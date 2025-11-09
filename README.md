@@ -1,3 +1,5 @@
+> Finderコメント: iPadとiPhoneで入力共有とSidecar体験を再現するプロトタイプ。
+
 # iPadとiPhone連携操作アプリ
 
 このリポジトリは、iPadとiPhoneの両方に同じアプリをインストールして使用することで、
