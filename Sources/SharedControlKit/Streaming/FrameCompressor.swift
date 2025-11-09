@@ -21,9 +21,11 @@ public final class FrameCompressor: FrameCompressorType {
 
     public func encode(pixelBuffer: CVPixelBuffer) async throws -> DisplayFrame {
         try await withCheckedThrowingContinuation { continuation in
+            let retainedBuffer = RetainedPixelBuffer(buffer: pixelBuffer)
             contextQueue.async {
+                let buffer = retainedBuffer.take()
                 do {
-                    let data = try self.encodeImageData(from: pixelBuffer)
+                    let data = try self.encodeImageData(from: buffer)
                     let frame = DisplayFrame(size: self.targetSize, payload: data, isDelta: false)
                     continuation.resume(returning: frame)
                 } catch {
@@ -73,6 +75,18 @@ public final class FrameCompressor: FrameCompressorType {
         case imageCreationFailed
         case destinationCreationFailed
         case encodeFailed
+    }
+}
+
+private struct RetainedPixelBuffer: @unchecked Sendable {
+    private let opaquePointer: UnsafeMutableRawPointer
+
+    init(buffer: CVPixelBuffer) {
+        self.opaquePointer = Unmanaged.passRetained(buffer).toOpaque()
+    }
+
+    func take() -> CVPixelBuffer {
+        Unmanaged<CVPixelBuffer>.fromOpaque(opaquePointer).takeRetainedValue()
     }
 }
 
