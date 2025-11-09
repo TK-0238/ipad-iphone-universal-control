@@ -1,7 +1,9 @@
 import Foundation
 import AVFoundation
-import VideoToolbox
 import CoreGraphics
+import CoreImage
+import UniformTypeIdentifiers
+import ImageIO
 
 public protocol FrameCompressorType {
     func encode(pixelBuffer: CVPixelBuffer) async throws -> DisplayFrame
@@ -9,81 +11,68 @@ public protocol FrameCompressorType {
 
 public final class FrameCompressor: FrameCompressorType {
     private let contextQueue = DispatchQueue(label: "jp.kawashimataiki.linkpad.encoder")
-    private var compressionSession: VTCompressionSession?
     private let targetSize: CGSize
+    private let ciContext: CIContext
 
     public init(targetSize: CGSize) {
         self.targetSize = targetSize
-        setupSession()
-    }
-
-    private func setupSession() {
-        VTCompressionSessionCreate(allocator: kCFAllocatorDefault,
-                                   width: Int32(targetSize.width),
-                                   height: Int32(targetSize.height),
-                                   codecType: kCMVideoCodecType_HEVC,
-                                   encoderSpecification: nil,
-                                   imageBufferAttributes: nil,
-                                   compressedDataAllocator: nil,
-                                   outputCallback: nil,
-                                   refcon: nil,
-                                   compressionSessionOut: &compressionSession)
-        if let session = compressionSession {
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_HEVC_Main_AutoLevel)
-        }
+        self.ciContext = CIContext(options: [.useSoftwareRenderer: false])
     }
 
     public func encode(pixelBuffer: CVPixelBuffer) async throws -> DisplayFrame {
         try await withCheckedThrowingContinuation { continuation in
-            let opaqueValue = UInt(bitPattern: Unmanaged.passRetained(pixelBuffer).toOpaque())
             contextQueue.async {
-                guard let pointer = UnsafeMutableRawPointer(bitPattern: opaqueValue) else {
-                    continuation.resume(throwing: CompressionError.dataExtractionFailed)
-                    return
-                }
-                let pixelBuffer = Unmanaged<CVPixelBuffer>.fromOpaque(pointer).takeRetainedValue()
-                guard let session = self.compressionSession else {
-                    continuation.resume(throwing: CompressionError.sessionMissing)
-                    return
-                }
-
-                var flags: VTEncodeInfoFlags = []
-                let presentationTimeStamp = CMTime(value: CMTimeValue(CACurrentMediaTime() * 1000), timescale: 1000)
-                let status = VTCompressionSessionEncodeFrame(session,
-                                                              imageBuffer: pixelBuffer,
-                                                              presentationTimeStamp: presentationTimeStamp,
-                                                              duration: .invalid,
-                                                              frameProperties: nil,
-                                                              infoFlagsOut: &flags,
-                                                              outputHandler: { status, _, buffer in
-                    if status == noErr, let buffer, let dataBuffer = CMSampleBufferGetDataBuffer(buffer) {
-                        var length = 0
-                        var dataPointer: UnsafeMutablePointer<Int8>?
-                        CMBlockBufferGetDataPointer(dataBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer)
-                        if let pointer = dataPointer {
-                            let data = Data(bytes: pointer, count: length)
-                            let frame = DisplayFrame(size: self.targetSize, payload: data, isDelta: !flags.contains(.frameDropped))
-                            continuation.resume(returning: frame)
-                        } else {
-                            continuation.resume(throwing: CompressionError.dataExtractionFailed)
-                        }
-                    } else {
-                        continuation.resume(throwing: CompressionError.encodeFailed(status))
-                    }
-                })
-
-                if status != noErr {
-                    continuation.resume(throwing: CompressionError.encodeFailed(status))
+                do {
+                    let data = try self.encodeImageData(from: pixelBuffer)
+                    let frame = DisplayFrame(size: self.targetSize, payload: data, isDelta: false)
+                    continuation.resume(returning: frame)
+                } catch {
+                    continuation.resume(throwing: error)
                 }
             }
         }
     }
 
+    private func encodeImageData(from pixelBuffer: CVPixelBuffer) throws -> Data {
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let scale = scalingFactors(for: ciImage.extent.size)
+        let scaled = ciImage
+            .transformed(by: CGAffineTransform(scaleX: scale.width, y: scale.height))
+            .transformed(by: CGAffineTransform(translationX: -ciImage.extent.origin.x * scale.width,
+                                               y: -ciImage.extent.origin.y * scale.height))
+
+        guard let cgImage = ciContext.createCGImage(scaled, from: CGRect(origin: .zero, size: targetSize)) else {
+            throw CompressionError.imageCreationFailed
+        }
+
+        return try writeJPEG(from: cgImage)
+    }
+
+    private func scalingFactors(for sourceSize: CGSize) -> CGSize {
+        guard sourceSize.width > 0, sourceSize.height > 0 else {
+            return CGSize(width: 1, height: 1)
+        }
+        return CGSize(width: targetSize.width / sourceSize.width,
+                      height: targetSize.height / sourceSize.height)
+    }
+
+    private func writeJPEG(from image: CGImage) throws -> Data {
+        let mutableData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(mutableData, UTType.jpeg.identifier as CFString, 1, nil) else {
+            throw CompressionError.destinationCreationFailed
+        }
+        let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.65]
+        CGImageDestinationAddImage(destination, image, options as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            throw CompressionError.encodeFailed
+        }
+        return mutableData as Data
+    }
+
     public enum CompressionError: Error {
-        case sessionMissing
-        case dataExtractionFailed
-        case encodeFailed(OSStatus)
+        case imageCreationFailed
+        case destinationCreationFailed
+        case encodeFailed
     }
 }
 
