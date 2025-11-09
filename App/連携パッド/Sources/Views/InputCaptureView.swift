@@ -73,9 +73,14 @@ final class CaptureView: UIView {
     }
 
     private func emitPointer(location: CGPoint) {
-        let delta = CGVector(dx: location.x - lastLocation.x, dy: location.y - lastLocation.y)
-        lastLocation = location
-        let pointer = PointerEvent(location: location, delta: delta, buttons: [])
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let normalized = CGPoint(
+            x: min(max(location.x / bounds.width, 0), 1),
+            y: min(max(location.y / bounds.height, 0), 1)
+        )
+        let delta = CGVector(dx: normalized.x - lastLocation.x, dy: normalized.y - lastLocation.y)
+        lastLocation = normalized
+        let pointer = PointerEvent(location: normalized, delta: delta, buttons: [])
         onEvent?(.pointer(pointer))
     }
 }

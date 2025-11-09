@@ -86,8 +86,8 @@ struct RemoteDisplaySurface: View {
 
     private func scaled(pointer: PointerEvent, in size: CGSize) -> CGPoint {
         CGPoint(
-            x: min(max(pointer.location.x, 0), size.width),
-            y: min(max(pointer.location.y, 0), size.height)
+            x: min(max(pointer.location.x, 0), 1) * size.width,
+            y: min(max(pointer.location.y, 0), 1) * size.height
         )
     }
 }
