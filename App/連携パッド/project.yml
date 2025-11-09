@@ -1,0 +1,36 @@
+name: 連携パッド
+options:
+  bundleIdPrefix: jp.kawashimataiki.linkpad
+  deploymentTarget:
+    iOS: 17.0
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    DEVELOPMENT_TEAM: ABCDE12345
+    SWIFT_VERSION: 5.10
+    IPHONEOS_DEPLOYMENT_TARGET: 17.0
+packages:
+  SharedKits:
+    path: ../..
+targets:
+  連携パッド:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+        excludes:
+          - "**/*.md"
+    resources:
+      - path: Sources/Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.kawashimataiki.linkpad.app
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+    dependencies:
+      - package: SharedKits
+        product: SharedControlKit
+      - package: SharedKits
+        product: SidecarCastingKit
