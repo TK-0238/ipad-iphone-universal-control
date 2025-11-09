@@ -12,7 +12,7 @@ struct ControllerView: View {
             peerList
             RemoteDisplaySurface(frame: viewModel.latestFrame, pointer: viewModel.remotePointer)
                 .overlay(
-                    InputCaptureView { event in
+                    InputCaptureView(frameSize: viewModel.latestFrame?.size) { event in
                         viewModel.emitLocal(event)
                     }
                 )
