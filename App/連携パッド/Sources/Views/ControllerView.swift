@@ -68,7 +68,7 @@ struct RemoteDisplaySurface: View {
                 }
 
                 if let pointer {
-                    let position = scaled(pointer: pointer, in: proxy.size, frame: frame)
+                    let position = scaled(pointer: pointer, in: proxy.size)
                     Circle()
                         .fill(.cyan.opacity(0.8))
                         .frame(width: 18, height: 18)
@@ -84,10 +84,10 @@ struct RemoteDisplaySurface: View {
         return UIImage(data: frame.payload)
     }
 
-    private func scaled(pointer: PointerEvent, in size: CGSize, frame: DisplayFrame?) -> CGPoint {
-        guard let frame else { return pointer.location }
-        let scaleX = size.width / frame.size.width
-        let scaleY = size.height / frame.size.height
-        return CGPoint(x: pointer.location.x * scaleX, y: pointer.location.y * scaleY)
+    private func scaled(pointer: PointerEvent, in size: CGSize) -> CGPoint {
+        CGPoint(
+            x: min(max(pointer.location.x, 0), size.width),
+            y: min(max(pointer.location.y, 0), size.height)
+        )
     }
 }

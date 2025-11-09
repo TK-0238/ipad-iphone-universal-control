@@ -101,6 +101,9 @@ final class AppSessionViewModel: ObservableObject {
 
     func emitLocal(_ event: InputEventPayload) {
         inputBridge.push(event)
+        if case .pointer(let pointer) = event {
+            remotePointer = pointer
+        }
     }
 }
 
