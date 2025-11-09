@@ -58,9 +58,8 @@ struct RemoteDisplaySurface: View {
                 if let image = image(from: frame) {
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFill()
+                        .scaledToFit()
                         .frame(width: proxy.size.width, height: proxy.size.height)
-                        .clipped()
                 } else {
                     Color.black
                     Text("映像待機中")
@@ -68,7 +67,7 @@ struct RemoteDisplaySurface: View {
                 }
 
                 if let pointer {
-                    let position = scaled(pointer: pointer, in: proxy.size)
+                    let position = scaled(pointer: pointer, in: proxy.size, frameSize: frame?.size)
                     Circle()
                         .fill(.cyan.opacity(0.8))
                         .frame(width: 18, height: 18)
@@ -84,10 +83,29 @@ struct RemoteDisplaySurface: View {
         return UIImage(data: frame.payload)
     }
 
-    private func scaled(pointer: PointerEvent, in size: CGSize) -> CGPoint {
-        CGPoint(
-            x: min(max(pointer.location.x, 0), 1) * size.width,
-            y: min(max(pointer.location.y, 0), 1) * size.height
+    private func scaled(pointer: PointerEvent, in containerSize: CGSize, frameSize: CGSize?) -> CGPoint {
+        let clampedX = min(max(pointer.location.x, 0), 1)
+        let clampedY = min(max(pointer.location.y, 0), 1)
+
+        guard let frameSize else {
+            return CGPoint(x: clampedX * containerSize.width,
+                           y: clampedY * containerSize.height)
+        }
+
+        let safeFrameWidth = max(frameSize.width, 1)
+        let safeFrameHeight = max(frameSize.height, 1)
+        let scale = min(containerSize.width / safeFrameWidth,
+                        containerSize.height / safeFrameHeight)
+        let renderedSize = CGSize(width: safeFrameWidth * scale,
+                                  height: safeFrameHeight * scale)
+        let origin = CGPoint(
+            x: (containerSize.width - renderedSize.width) / 2,
+            y: (containerSize.height - renderedSize.height) / 2
+        )
+
+        return CGPoint(
+            x: origin.x + clampedX * renderedSize.width,
+            y: origin.y + clampedY * renderedSize.height
         )
     }
 }
