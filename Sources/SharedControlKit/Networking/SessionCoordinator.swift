@@ -3,6 +3,7 @@ import Combine
 import MultipeerConnectivity
 import Network
 import os.log
+import QuartzCore
 
 public enum SessionState {
     case idle
@@ -85,7 +86,10 @@ public final class SessionCoordinator: NSObject, ObservableObject {
         session = nil
         advertiser = nil
         browser = nil
-        state = .idle
+        DispatchQueue.main.async {
+            self.discoveredPeers.removeAll()
+            self.state = .idle
+        }
     }
 }
 
@@ -101,13 +105,17 @@ extension SessionCoordinator: MCNearbyServiceAdvertiserDelegate {
 
 extension SessionCoordinator: MCNearbyServiceBrowserDelegate {
     public func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
-        if !discoveredPeers.contains(peerID) {
-            discoveredPeers.append(peerID)
+        DispatchQueue.main.async {
+            if !self.discoveredPeers.contains(peerID) {
+                self.discoveredPeers.append(peerID)
+            }
         }
     }
 
     public func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
-        discoveredPeers.removeAll { $0 == peerID }
+        DispatchQueue.main.async {
+            self.discoveredPeers.removeAll { $0 == peerID }
+        }
     }
 }
 
@@ -129,6 +137,9 @@ extension SessionCoordinator: MCSessionDelegate {
 
     public func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         if let event = try? JSONDecoder().decode(InputEventPayload.self, from: data) {
+            if case .system(let systemEvent) = event {
+                respond(to: systemEvent, from: peerID)
+            }
             inputSubject.send(event)
         } else if let frame = try? JSONDecoder().decode(DisplayFrame.self, from: data) {
             frameSubject.send(frame)
@@ -138,4 +149,22 @@ extension SessionCoordinator: MCSessionDelegate {
     public func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
     public func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
     public func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
+}
+
+private extension SessionCoordinator {
+    func respond(to event: SystemEvent, from peerID: MCPeerID) {
+        guard let session else { return }
+        switch event {
+        case .ping(let id, _):
+            let response = InputEventPayload.system(.pong(id: id, timestamp: CACurrentMediaTime()))
+            guard let data = try? JSONEncoder().encode(response) else { return }
+            do {
+                try session.send(data, toPeers: [peerID], with: .reliable)
+            } catch {
+                log.error("Failed to respond to ping: \(error.localizedDescription, privacy: .public)")
+            }
+        case .pong:
+            break
+        }
+    }
 }

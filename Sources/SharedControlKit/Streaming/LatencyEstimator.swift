@@ -5,9 +5,11 @@ import QuartzCore
 @MainActor
 public final class LatencyEstimator: ObservableObject {
     @Published public private(set) var roundTripTime: TimeInterval = 0
+
     private var cancellables = Set<AnyCancellable>()
     private let timer: AnyPublisher<Date, Never>
     private let session: SessionCoordinator
+    private var pendingPings: [UUID: TimeInterval] = [:]
 
     public init(session: SessionCoordinator, interval: TimeInterval = 1.0) {
         self.session = session
@@ -18,23 +20,41 @@ public final class LatencyEstimator: ObservableObject {
     private func bind() {
         timer
             .sink { [weak self] _ in
-                guard let self else { return }
                 Task { @MainActor in
-                    await self.measureRTT()
+                    self?.sendPing()
+                }
+            }
+            .store(in: &cancellables)
+
+        session.inputEvents
+            .sink { [weak self] event in
+                guard case .system(let systemEvent) = event else { return }
+                Task { @MainActor in
+                    self?.handle(systemEvent)
                 }
             }
             .store(in: &cancellables)
     }
 
-    private func measureRTT() async {
+    private func sendPing() {
         let pingID = UUID()
         let start = CACurrentMediaTime()
-        let payload = InputEventPayload.key(KeyEvent(key: "__ping__\(pingID.uuidString)", isKeyDown: true))
-        try? session.send(event: payload)
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        let end = CACurrentMediaTime()
-        DispatchQueue.main.async { [weak self] in
-            self?.roundTripTime = end - start
+        pendingPings[pingID] = start
+        let payload = InputEventPayload.system(.ping(id: pingID, timestamp: start))
+        do {
+            try session.send(event: payload)
+        } catch {
+            pendingPings.removeValue(forKey: pingID)
+        }
+    }
+
+    private func handle(_ event: SystemEvent) {
+        switch event {
+        case .pong(let id, _):
+            guard let start = pendingPings.removeValue(forKey: id) else { return }
+            roundTripTime = CACurrentMediaTime() - start
+        case .ping:
+            break
         }
     }
 }

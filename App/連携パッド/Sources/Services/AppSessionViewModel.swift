@@ -41,6 +41,8 @@ final class AppSessionViewModel: ObservableObject {
                     self?.remotePointer = pointer
                 case .key:
                     break
+                case .system:
+                    break
                 }
             }
             .store(in: &cancellables)

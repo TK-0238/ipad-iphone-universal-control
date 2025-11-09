@@ -59,6 +59,12 @@ public struct PointerEvent: Codable, Sendable, Hashable {
 public enum InputEventPayload: Codable, Sendable, Hashable {
     case key(KeyEvent)
     case pointer(PointerEvent)
+    case system(SystemEvent)
+}
+
+public enum SystemEvent: Codable, Sendable, Hashable {
+    case ping(id: UUID, timestamp: TimeInterval)
+    case pong(id: UUID, timestamp: TimeInterval)
 }
 
 public struct DisplayFrame: Codable, Sendable, Hashable {

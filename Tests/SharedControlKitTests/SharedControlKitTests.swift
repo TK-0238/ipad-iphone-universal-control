@@ -23,4 +23,12 @@ struct SharedControlKitTests {
         let decoded = try JSONDecoder().decode(InputEventPayload.self, from: data)
         #expect(decoded == event)
     }
+
+    @Test("System event roundtrip")
+    func systemEventEncodingDecoding() throws {
+        let event = InputEventPayload.system(.ping(id: UUID(), timestamp: 1.23))
+        let data = try JSONEncoder().encode(event)
+        let decoded = try JSONDecoder().decode(InputEventPayload.self, from: data)
+        #expect(decoded == event)
+    }
 }
