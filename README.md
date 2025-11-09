@@ -49,3 +49,36 @@
 3. iOS/iPadOS アプリの UI + サービス結線
 4. 実機テストと計測ログ出力
 
+## ディレクトリ構成
+
+| パス | 役割 |
+| --- | --- |
+| `Sources/SharedControlKit` | 入力イベント・セッション管理など共通ロジック |
+| `Sources/SidecarCastingKit` | ReplayKitベースの画面共有コンポーネント |
+| `Tests/SharedControlKitTests` | Swift Testing を使ったシリアライズ検証 |
+| `App/連携パッド` | SwiftUIアプリ本体（XcodeGen構成とXcodeprojを同梱） |
+| `資料/アーキテクチャ設計.md` | 詳細アーキテクチャ設計 |
+
+## ビルド & 実行手順
+
+1. 依存ツール（初回のみ）
+   ```bash
+   brew install xcodegen
+   ```
+2. Xcodeプロジェクト生成
+   ```bash
+   cd App/連携パッド
+   xcodegen generate
+   open 連携パッド.xcodeproj
+   ```
+3. Xcodeで `連携パッド` ターゲットを選択し、実機もしくはシミュレータ (iOS/iPadOS 17 以上) で実行。
+
+## テスト
+
+共有ライブラリ層は Swift Package Manager で検証できます。
+
+```bash
+swift test --enable-swift-testing
+```
+
+`SharedControlKitTests` では入力イベントのエンコード／デコード整合性を確認しています。今後はネットワーク遅延や再送制御のテストを追加していきます。
