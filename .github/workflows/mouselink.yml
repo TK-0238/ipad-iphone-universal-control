@@ -1,0 +1,55 @@
+name: MouseLink native verification
+on:
+  pull_request:
+    paths: ['MouseLink/**', '.github/workflows/mouselink.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Original suite
+        run: swift test
+      - name: MouseLink core suite
+        run: swift test --package-path MouseLink
+      - name: Package offline iPad source
+        run: python3 MouseLink/tools/package_app.py
+      - name: Generate native project
+        run: |
+          command -v xcodegen || brew install xcodegen
+          cd MouseLink/out
+          xcodegen generate
+      - name: Build iOS app
+        run: |
+          set -o pipefail
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath MouseLink/DerivedData CODE_SIGNING_ALLOWED=NO build > MouseLink/out/build.log 2>&1 || { tail -100 MouseLink/out/build.log; exit 1; }
+          tail -12 MouseLink/out/build.log
+      - name: Native iPad UI test and screenshots
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > MouseLink/out/devices.json
+          DEVICE=$(python3 -c 'import json; d=json.load(open("MouseLink/out/devices.json")); print(next(x["udid"] for ds in d["devices"].values() for x in ds if "iPad Pro" in x["name"] and x.get("isAvailable",False)))')
+          echo "$DEVICE" > MouseLink/out/device-id.txt
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/UITests.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/ui-test.log 2>&1 || { tail -100 MouseLink/out/ui-test.log; exit 1; }
+          xcrun simctl launch "$DEVICE" jp.kawashimataiki.mouselink
+          sleep 3
+          xcrun simctl io "$DEVICE" screenshot MouseLink/out/mouselink-ipad.png
+          xcrun xcresulttool export attachments --path MouseLink/out/UITests.xcresult --output-path MouseLink/out/ui-screenshots || true
+          xcrun simctl shutdown "$DEVICE"
+      - name: Upload source and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MouseLink-iPad-and-validation
+          retention-days: 14
+          path: |
+            MouseLink/out/MouseLink-iPad.zip
+            MouseLink/out/*.log
+            MouseLink/out/*.png
+            MouseLink/out/ui-screenshots
+            MouseLink/out/UITests.xcresult

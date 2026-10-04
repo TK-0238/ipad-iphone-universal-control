@@ -1,0 +1,5 @@
+.build/
+out/
+DerivedData/
+__pycache__/
+*.pyc
