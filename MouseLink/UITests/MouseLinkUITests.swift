@@ -16,6 +16,9 @@ final class MouseLinkUITests: XCTestCase {
         app.buttons["閉じる"].tap()
         app.buttons["license"].tap()
         XCTAssertTrue(app.navigationBars["ライセンス"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.links["上流プロジェクト"].exists)
+        // The captured accessibility tree exposes SwiftUI Link as a Button on iPadOS.
+        XCTAssertTrue(app.buttons["上流プロジェクト"].exists)
+        XCTAssertTrue(app.buttons["MouseLinkの完全なソース"].exists)
+        let license = XCTAttachment(screenshot: app.screenshot()); license.name = "MouseLink-license"; license.lifetime = .keepAlways; add(license)
     }
 }

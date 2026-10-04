@@ -35,12 +35,18 @@ jobs:
           echo "$DEVICE" > MouseLink/out/device-id.txt
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
-          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/UITests.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/ui-test.log 2>&1 || { tail -100 MouseLink/out/ui-test.log; exit 1; }
+          xcrun simctl install "$DEVICE" MouseLink/DerivedData/Build/Products/Debug-iphonesimulator/MouseLink.app
           xcrun simctl launch "$DEVICE" jp.kawashimataiki.mouselink
           sleep 3
           xcrun simctl io "$DEVICE" screenshot MouseLink/out/mouselink-ipad.png
+          set +e
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/UITests.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/ui-test.log 2>&1
+          TEST_STATUS=$?
+          set -e
+          tail -50 MouseLink/out/ui-test.log
           xcrun xcresulttool export attachments --path MouseLink/out/UITests.xcresult --output-path MouseLink/out/ui-screenshots || true
           xcrun simctl shutdown "$DEVICE"
+          exit "$TEST_STATUS"
       - name: Upload source and evidence
         if: always()
         uses: actions/upload-artifact@v4
