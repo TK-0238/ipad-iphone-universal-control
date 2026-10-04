@@ -8,26 +8,39 @@ permissions:
 jobs:
   verify:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Original suite
-        run: swift test
-      - name: MouseLink core suite
-        run: swift test --package-path MouseLink
-      - name: Package offline iPad source
-        run: python3 MouseLink/tools/package_keyboard_app.py
+        run: |
+          set -o pipefail
+          mkdir -p MouseLink/out
+          swift test 2>&1 | tee MouseLink/out/original-tests.log
+      - name: MouseLink debug and release suites
+        run: |
+          set -o pipefail
+          swift test --package-path MouseLink 2>&1 | tee MouseLink/out/core-debug.log
+          swift test --package-path MouseLink -c release 2>&1 | tee MouseLink/out/core-release.log
+      - name: Package offline iPad source and verify safety wiring
+        run: |
+          set -o pipefail
+          python3 MouseLink/tools/package_keyboard_app.py
+          python3 MouseLink/tools/test_hardening.py -v 2>&1 | tee MouseLink/out/package-tests.log
+          git archive --format=zip --output=MouseLink/out/QA-source.zip HEAD MouseLink .github/workflows/mouselink.yml
+          git rev-parse HEAD > MouseLink/out/checkout-sha.txt
       - name: Generate native project
         run: |
           command -v xcodegen || brew install xcodegen
           cd MouseLink/out
           xcodegen generate
-      - name: Build iOS app
+      - name: Build iOS Simulator debug and iOS device release
         run: |
           set -o pipefail
           xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath MouseLink/DerivedData CODE_SIGNING_ALLOWED=NO build > MouseLink/out/build.log 2>&1 || { tail -100 MouseLink/out/build.log; exit 1; }
-          tail -12 MouseLink/out/build.log
-      - name: Native iPad UI test and screenshots
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release -derivedDataPath MouseLink/DeviceDerivedData CODE_SIGNING_ALLOWED=NO build > MouseLink/out/device-release-build.log 2>&1 || { tail -100 MouseLink/out/device-release-build.log; exit 1; }
+          tail -6 MouseLink/out/build.log
+          tail -6 MouseLink/out/device-release-build.log
+      - name: Native iPad safety and UI tests with screenshots
         run: |
           set -euo pipefail
           xcrun simctl list devices available -j > MouseLink/out/devices.json
@@ -43,7 +56,7 @@ jobs:
           xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/UITests.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/ui-test.log 2>&1
           TEST_STATUS=$?
           set -e
-          tail -50 MouseLink/out/ui-test.log
+          tail -85 MouseLink/out/ui-test.log
           xcrun xcresulttool export attachments --path MouseLink/out/UITests.xcresult --output-path MouseLink/out/ui-screenshots || true
           xcrun simctl shutdown "$DEVICE"
           exit "$TEST_STATUS"
@@ -55,7 +68,9 @@ jobs:
           retention-days: 14
           path: |
             MouseLink/out/MouseLink-iPad.zip
+            MouseLink/out/QA-source.zip
             MouseLink/out/*.log
+            MouseLink/out/*.txt
             MouseLink/out/*.png
             MouseLink/out/ui-screenshots
             MouseLink/out/UITests.xcresult

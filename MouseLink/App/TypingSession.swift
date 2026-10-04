@@ -7,6 +7,8 @@ enum KeyboardSendResult { case accepted, busy, unavailable }
 @MainActor
 protocol KeyboardSending: AnyObject {
     var keyboardReceivers: Set<UUID> { get }
+    /// Changes whenever the transport connection/subscription/protocol lifetime changes.
+    var inputEpoch: UInt64 { get }
     func sendKeyboardBytes(_ bytes: Data, to peer: UUID) -> KeyboardSendResult
     func hardDisconnect()
 }
@@ -24,6 +26,9 @@ final class TypingSession: ObservableObject {
     private let clock: () -> TimeInterval
     private var timer: AnyCancellable?
     private var transaction = KeyboardTransaction()
+    private var transactionEpoch: UInt64?
+    private var pumping = false
+    private var operation: UInt64 = 0
     private var foreground = true
     private var opened = false
 
@@ -69,22 +74,33 @@ final class TypingSession: ObservableObject {
         refreshAvailability()
         guard opened, available, foreground, let peer else { status="iPhoneのキーボード接続を確認してください。入力は送信されていません。";return }
         try transaction.begin(plan,peer:peer,at:clock())
+        transactionEpoch=sender.inputEpoch;operation &+= 1
         isSending=true;remaining=transaction.remaining
         status="キーを順番に転送中です。中止すると未送信のEnterも破棄します。"
         pump()
     }
     func cancel(reason: String = "文字転送を中止しました。自動再送はしません。") {
+        operation &+= 1
+        let sameConnection = transactionEpoch == sender.inputEpoch
         if let peer=transaction.cancel() {
-            // Release ONLY the original target. If the OS queue cannot take it, tear down the link.
-            if sender.sendKeyboardBytes(KeyboardStroke.zero.data,to:peer) != .accepted { sender.hardDisconnect() }
+            // A stable UUID may now denote a NEW connection: never inject old release/Enter into it.
+            if sameConnection {
+                if sender.sendKeyboardBytes(KeyboardStroke.zero.data,to:peer) != .accepted { sender.hardDisconnect() }
+            } else {
+                // Topology changes may leave the original host connected with a held key.
+                // Tear down rather than write a release into a possibly new connection.
+                sender.hardDisconnect()
+            }
             status=reason
         }
-        isSending=false;remaining=0
+        transactionEpoch=nil;isSending=false;remaining=0
     }
     func pump() {
+        guard !pumping else { return }
+        pumping=true;defer { pumping=false }
         refreshAvailability()
         guard transaction.isActive else { return }
-        guard opened,foreground,available,transaction.peer == peer else {
+        guard opened,foreground,available,transaction.peer == peer,transactionEpoch == sender.inputEpoch else {
             cancel(reason:"接続状態が変わったため文字転送を中止しました。iPhoneの入力内容を確認してください。");return
         }
         let time=clock()
@@ -92,11 +108,14 @@ final class TypingSession: ObservableObject {
             cancel(reason:"Bluetoothの待機が長いため停止しました。一部だけ届いている可能性があります。自動再送しません。");return
         }
         guard let report=transaction.due(at:time),let target=transaction.peer else { return }
-        switch sender.sendKeyboardBytes(report.data,to:target) {
+        let currentOperation=operation
+        let result=sender.sendKeyboardBytes(report.data,to:target)
+        guard currentOperation == operation, transactionEpoch == sender.inputEpoch else { return }
+        switch result {
         case .accepted:
             transaction.accept(at:time);remaining=transaction.remaining
             if !transaction.isActive {
-                isSending=false
+                transactionEpoch=nil;isSending=false
                 status="Bluetoothへの送信受付が完了しました。iPhoneの表示・変換・送信結果は画面で確認してください。"
             }
         case .busy: break

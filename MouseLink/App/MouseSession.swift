@@ -25,6 +25,8 @@ final class MouseSession: ObservableObject {
     private var motion = MotionAccumulator()
     private var held: UInt8 = 0
     private var blocked = false
+    private var draining = false
+    private var mouseEpoch: UInt64 = 0
     private var subscriptions = Set<AnyCancellable>()
     private var oldIdleTimer = false
     private var ownsIdleTimer = false
@@ -88,9 +90,15 @@ final class MouseSession: ObservableObject {
             message = "マウスと受信先iPhoneの接続を確認してください。"; return
         }
         pause(reason: "")
+        // Never replace an outstanding release with a new host's movement queue.
+        guard buffer.next == nil else {
+            buffer.disconnect(); bluetooth.hardDisconnect()
+            message = "停止通知を送れなかったため切断しました。接続を確認して再開してください。"; return
+        }
         bluetooth.stop()
         motion = MotionAccumulator(); held = 0; blocked = false
         buffer.begin(peer: peer, at: now)
+        mouseEpoch = bluetooth.inputEpoch
         pointerGate.request(at: now)
         isRelaying = true; capturedMouse = mouse
         let generation = buffer.generation
@@ -187,22 +195,47 @@ final class MouseSession: ObservableObject {
         do { try buffer.enqueue([MouseFrame(buttons: held)], at: now); drain() }
         catch { pause(reason: error.localizedDescription) }
     }
+    private func discardMouseTransfer() {
+        buffer.disconnect(); detachMouse(); isRelaying = false
+        held = 0; motion = MotionAccumulator(); pointerGate.stop(); blocked = false
+        if ownsIdleTimer { UIApplication.shared.isIdleTimerDisabled = oldIdleTimer; ownsIdleTimer = false }
+    }
     private func drain() {
-        guard !blocked else { return }
+        guard !draining else { return }
+        draining = true; defer { draining = false }
         while let item = buffer.next {
-            guard item.generation == buffer.generation else { buffer.disconnect(); return }
+            let decision = MouseDispatchSafety.decide(item, at: now, active: buffer.isActive,
+                foreground: foreground, locked: pointerIsLocked?() == true,
+                sameConnection: item.generation == buffer.generation && mouseEpoch == bluetooth.inputEpoch)
+            switch decision {
+            case .discard:
+                bluetooth.hardDisconnect()
+                discardMouseTransfer()
+                message = "接続が変わったため停止しました。古い入力は再送しません。"; return
+            case .disconnect:
+                discardMouseTransfer(); bluetooth.hardDisconnect()
+                message = "停止通知の期限を過ぎたため接続を解除しました。"; return
+            case .release:
+                pause(reason: "入力が遅延、または操作許可が解除されたため停止しました。")
+                continue
+            case .send: break
+            }
+            guard !blocked else { return }
             let report = MouseReport(buttons: MouseButtons(rawValue: item.frame.buttons), dX: item.frame.x, dY: item.frame.y, wheel: item.frame.wheel)
             switch bluetooth.tryRelayMouse(report, to: item.peer) {
             case .accepted: buffer.acceptNext()
             case .busy: blocked = true; return
             case .unavailable:
-                buffer.disconnect(); detachMouse(); isRelaying = false
-                if ownsIdleTimer { UIApplication.shared.isIdleTimerDisabled = oldIdleTimer; ownsIdleTimer = false }
+                discardMouseTransfer()
                 message = "受信先に送信できません。iPhoneの接続状態を確認してください。"; return
             }
         }
     }
     private func tick() {
+        if isRelaying && mouseEpoch != bluetooth.inputEpoch {
+            discardMouseTransfer(); bluetooth.hardDisconnect()
+            message = "接続が変わったため停止しました。再開には開始ボタンを押してください。"
+        }
         if !isRelaying { refreshMouse() } else { _ = inputLockReady() }
         if buffer.expire(at: now) { pause(reason: RelayFailure.stale.localizedDescription) }
         if !isRelaying, let first = buffer.next, now - first.queuedAt > 0.7 {

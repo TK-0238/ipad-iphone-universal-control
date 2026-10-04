@@ -67,8 +67,8 @@ public struct RelayBuffer: Sendable {
     public var next: PendingMouseFrame? { pending.first }
     public var count: Int { pending.count }
     public mutating func begin(peer: UUID, at time: TimeInterval) {
+        guard time.isFinite, time >= 0 else { return }
         disconnect()
-        guard time.isFinite else { return }
         self.peer = peer; isActive = true
         pending = [PendingMouseFrame(peer: peer, generation: generation, frame: .zero, queuedAt: time)]
     }
@@ -80,6 +80,8 @@ public struct RelayBuffer: Sendable {
     }
     public mutating func acceptNext() { if !pending.isEmpty { pending.removeFirst() } }
     public mutating func pause(at time: TimeInterval) {
+        // Repeated stop must neither postpone an outstanding release nor create a new one.
+        guard isActive else { return }
         isActive = false; generation &+= 1; pending.removeAll(keepingCapacity: true)
         if let peer { pending.append(PendingMouseFrame(peer: peer, generation: generation, frame: .zero, queuedAt: time.isFinite ? time : 0)) }
     }

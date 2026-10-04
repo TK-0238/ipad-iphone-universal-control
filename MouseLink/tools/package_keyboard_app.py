@@ -3,6 +3,7 @@
 from pathlib import Path
 import runpy
 import zipfile
+from harden_transport import harden
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -85,12 +86,15 @@ UNIT_TARGET='''  MouseLinkNativeTests:
 
 def augment(app):
     vendor=app/'Sources/Vendor/HIDPeripheral.swift'
-    vendor.write_text(patch_keyboard(vendor.read_text()))
-    p=app/'Package.swift';p.write_text(p.read_text().replace('displayVersion: "0.1.0", bundleVersion: "1"','displayVersion: "0.2.0", bundleVersion: "2"'))
-    readme=ROOT/'docs/keyboard-enter.md'
-    if readme.exists(): (app/'文字入力とEnter.md').write_bytes(readme.read_bytes())
+    before=patch_keyboard(vendor.read_text())
+    (app.parent/'transport-before-hardening.swift').write_text(before)
+    vendor.write_text(harden(before))
+    p=app/'Package.swift';p.write_text(p.read_text().replace('displayVersion: "0.1.0", bundleVersion: "1"','displayVersion: "0.2.1", bundleVersion: "3"'))
+    for src,dest in [('docs/keyboard-enter.md','文字入力とEnter.md'),('docs/qa-0.2.1.md','検証方針と変更点.md')]:
+        readme=ROOT/src
+        if readme.exists(): (app/dest).write_bytes(readme.read_bytes())
     p=app/'THIRD_PARTY_NOTICES.md'
-    p.write_text(p.read_text()+'\nMouseLink 0.2 adds targeted keyboard notifications, boot/report selection, on-screen typing, bounded press/release transactions and kana-reading conversion. All modifications remain AGPL-3.0-only.\n')
+    p.write_text(p.read_text()+'\nMouseLink 0.2 adds targeted keyboard notifications, boot/report selection, on-screen typing, bounded press/release transactions and kana-reading conversion. 0.2.1 adds connection epochs, callback identity checks, shared notification flow control, targeted bootstrap reports, suspend-state tracking and idempotent stop. All modifications remain AGPL-3.0-only.\n')
 
 def archive(app):
     path=app.parent/'MouseLink-iPad.zip'
@@ -107,7 +111,7 @@ def main():
     t=t.replace('schemes:\n',UNIT_TARGET+'schemes:\n')
     t=t.replace('        MouseLinkUITests: [test]','        MouseLinkUITests: [test]\n        MouseLinkNativeTests: [test]')
     t=t.replace('      targets: [MouseLinkUITests]','      targets: [MouseLinkUITests, MouseLinkNativeTests]')
-    t=t.replace('MARKETING_VERSION: 0.1.0','MARKETING_VERSION: 0.2.0').replace('CURRENT_PROJECT_VERSION: 1','CURRENT_PROJECT_VERSION: 2')
+    t=t.replace('MARKETING_VERSION: 0.1.0','MARKETING_VERSION: 0.2.1').replace('CURRENT_PROJECT_VERSION: 1','CURRENT_PROJECT_VERSION: 3')
     p.write_text(t)
     print('Keyboard package:',archive(app))
 

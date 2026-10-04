@@ -38,9 +38,9 @@ struct TypingView: View {
                         }
                     }
                     HStack {
-                        Button("文字を転送") { draftFocused=false;DispatchQueue.main.async { session.sendDraft(enter:false) } }
+                        Button("文字を転送") { draftFocused=false;session.sendDraft(enter:false) }
                             .buttonStyle(.bordered).accessibilityIdentifier("send-text")
-                        Button("文字を転送 ＋ Enter") { draftFocused=false;DispatchQueue.main.async { session.sendDraft(enter:true) } }
+                        Button("文字を転送 ＋ Enter") { draftFocused=false;session.sendDraft(enter:true) }
                             .buttonStyle(.borderedProminent).accessibilityIdentifier("send-text-enter")
                     }.disabled(!session.canSend || !validDraft)
                     Text(session.status).font(.subheadline).fixedSize(horizontal:false,vertical:true).accessibilityIdentifier("typing-status")

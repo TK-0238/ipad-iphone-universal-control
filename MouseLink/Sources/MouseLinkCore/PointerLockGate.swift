@@ -15,6 +15,7 @@ public struct PointerLockGate: Sendable {
     public mutating func observe(locked: Bool, at time: TimeInterval) -> Bool {
         guard let start = requestedAt else { return false }
         guard time.isFinite, time >= start else { stop(); return true }
+        if !canForward && time - start > 1 { stop(); return true }
         if locked { canForward = true; return false }
         if canForward || time - start > 1 { stop(); return true }
         return false

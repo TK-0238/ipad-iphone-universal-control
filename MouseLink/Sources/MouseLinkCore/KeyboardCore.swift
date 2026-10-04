@@ -104,7 +104,7 @@ public struct KeyboardTransaction: Sendable {
     public var remaining: Int { max(0,reports.count-index) }
     public mutating func begin(_ plan: KeyboardPlan, peer: UUID, at time: TimeInterval) throws {
         guard !isActive else { throw KeyboardError.busy }
-        guard time.isFinite else { throw KeyboardError.invalidTime }
+        guard time.isFinite, time >= 0, time + 0.02 > time else { throw KeyboardError.invalidTime }
         self.peer=peer;reports=plan.reports;index=0;nextTime=time;lastProgress=time
     }
     public func due(at time: TimeInterval) -> KeyboardStroke? {
