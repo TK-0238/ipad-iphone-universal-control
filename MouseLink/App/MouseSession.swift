@@ -15,6 +15,9 @@ final class MouseSession: ObservableObject {
     @Published private(set) var message = "マウスをiPadに接続し、iPhoneとのペアリングを開始してください。"
     @Published var sensitivity: Double = 1
     @Published var reverseScroll = false
+    // Read UIKit's resolved state at each event, not just our requested preference.
+    var pointerIsLocked: (() -> Bool)?
+    private var pointerGate = PointerLockGate()
     private var foreground = true
     private var capturedMouse: GCMouse?
     private var buffer = RelayBuffer()
@@ -83,6 +86,7 @@ final class MouseSession: ObservableObject {
         bluetooth.stop()
         motion = MotionAccumulator(); held = 0; blocked = false
         buffer.begin(peer: peer, at: now)
+        pointerGate.request(at: now)
         isRelaying = true; capturedMouse = mouse
         let generation = buffer.generation
         mouse.handlerQueue = .main
@@ -112,7 +116,7 @@ final class MouseSession: ObservableObject {
     }
     func pause(reason: String = "転送を停止しました。") {
         detachMouse()
-        isRelaying = false; held = 0; motion = MotionAccumulator()
+        isRelaying = false; held = 0; motion = MotionAccumulator(); pointerGate.stop()
         buffer.pause(at: now)
         if ownsIdleTimer { UIApplication.shared.isIdleTimerDisabled = oldIdleTimer; ownsIdleTimer = false }
         if !reason.isEmpty { message = reason }
@@ -124,12 +128,17 @@ final class MouseSession: ObservableObject {
     }
     func setForeground(_ value: Bool) {
         foreground = value
-        if !value { pause(reason: "アプリが非アクティブになったため停止しました。") }
+        if !value {
+            pause(reason: "アプリが非アクティブになったため停止しました。")
+            // Background suspension can prevent the timer or write-ready callback from running.
+            if buffer.next != nil { buffer.disconnect(); bluetooth.hardDisconnect() }
+        }
         else { refreshMouse() }
     }
     private func refreshMouse() {
         let mouse = GCMouse.current ?? GCMouse.mice().first
-        mouseName = mouse.map { $0.vendorName ?? "接続済みマウス" }
+        let name = mouse.map { $0.vendorName ?? "接続済みマウス" }
+        if name != mouseName { mouseName = name }
     }
     private func updateReceivers(_ peers: Set<UUID>) {
         if isRelaying, let id = buffer.peer, !peers.contains(id) {
@@ -139,8 +148,19 @@ final class MouseSession: ObservableObject {
         selected = ReceiverPolicy.choose(previous: selected, available: peers)
         receivers = peers.sorted { $0.uuidString < $1.uuidString }
     }
+    func pointerLockChanged() {
+        _ = inputLockReady()
+    }
+    private func inputLockReady() -> Bool {
+        guard isRelaying else { return false }
+        if pointerGate.observe(locked: pointerIsLocked?() == true, at: now) {
+            pause(reason: "マウスのロックが解除されたため停止しました。フルスクリーンで再開してください。")
+            return false
+        }
+        return pointerGate.canForward
+    }
     private func move(dx: Double, dy: Double, wheel: Double, generation: UInt64) {
-        guard isRelaying, foreground, generation == buffer.generation else { return }
+        guard isRelaying, foreground, generation == buffer.generation, inputLockReady() else { return }
         do {
             let gain = sensitivity.isFinite ? min(3, max(0.25, sensitivity)) : 1
             let frames = try motion.add(x: dx * gain, y: -dy * gain,
@@ -149,7 +169,7 @@ final class MouseSession: ObservableObject {
         } catch { pause(reason: error.localizedDescription) }
     }
     private func button(mask: UInt8, pressed: Bool, generation: UInt64) {
-        guard isRelaying, foreground, generation == buffer.generation else { return }
+        guard isRelaying, foreground, generation == buffer.generation, inputLockReady() else { return }
         if pressed { held |= mask } else { held &= ~mask }
         do { try buffer.enqueue([MouseFrame(buttons: held)], at: now); drain() }
         catch { pause(reason: error.localizedDescription) }
@@ -170,7 +190,7 @@ final class MouseSession: ObservableObject {
         }
     }
     private func tick() {
-        if !isRelaying { refreshMouse() }
+        if !isRelaying { refreshMouse() } else { _ = inputLockReady() }
         if buffer.expire(at: now) { pause(reason: RelayFailure.stale.localizedDescription) }
         if !isRelaying, let first = buffer.next, now - first.queuedAt > 0.7 {
             buffer.disconnect(); bluetooth.hardDisconnect()

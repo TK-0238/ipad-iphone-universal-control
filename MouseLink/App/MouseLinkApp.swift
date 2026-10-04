@@ -28,7 +28,33 @@ final class LockHostingController: UIHostingController<MouseLinkView> {
     var locked = false {
         didSet { if oldValue != locked { setNeedsUpdateOfPrefersPointerLocked(); parent?.setNeedsUpdateOfPrefersPointerLocked() } }
     }
-    init(session: MouseSession) { super.init(rootView: MouseLinkView(session: session)) }
+    private weak var session: MouseSession?
+    private var lockObserver: NSObjectProtocol?
+    init(session: MouseSession) {
+        self.session = session
+        super.init(rootView: MouseLinkView(session: session))
+        session.pointerIsLocked = { [weak self] in
+            self?.viewIfLoaded?.window?.windowScene?.pointerLockState?.isLocked == true
+        }
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if let lockObserver { NotificationCenter.default.removeObserver(lockObserver) }
+        if let state = view.window?.windowScene?.pointerLockState {
+            lockObserver = NotificationCenter.default.addObserver(forName: UIPointerLockState.didChangeNotification,
+                object: state, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.session?.pointerLockChanged() }
+            }
+        }
+        session?.pointerLockChanged()
+    }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if let lockObserver { NotificationCenter.default.removeObserver(lockObserver) }
+        lockObserver = nil
+        if session?.isRelaying == true { session?.pause(reason: "操作画面が非表示になったため停止しました。") }
+    }
+    deinit { if let lockObserver { NotificationCenter.default.removeObserver(lockObserver) } }
     @objc required dynamic init?(coder aDecoder: NSCoder) { fatalError("Storyboard is not used") }
     override var prefersPointerLocked: Bool { locked }
 }
@@ -140,7 +166,7 @@ struct GuideView: View {
         NavigationStack {
             List {
                 Section("1 · iPadにマウスを接続") {
-                    Text("いつも使うマウスをiPadへ接続します。物理キーボードードは不要です。MouseLinkをフルスクリーンで開き、「接続待ちを開始」を押します。")
+                    Text("いつも使うマウスをiPadへ接続します。物理キーボードは不要です。MouseLinkをフルスクリーンで開き、「接続待ちを開始」を押します。")
                 }
                 Section("2 · iPhoneでAssistiveTouchをオン") {
                     Text("設定 → アクセシビリティ → タッチ → AssistiveTouchをオンにします。その画面の「デバイス」→「Bluetoothデバイス」でMouseLinkを選び、システムのペアリング要求を確認します。")
@@ -149,7 +175,7 @@ struct GuideView: View {
                     Text("iPadで受信先を選び、「iPhoneの操作を開始」を押します。移動・左クリック・右クリック・ホイールをBluetoothで直接送ります。iPhone側にこのアプリをインストールする必要はありません。")
                 }
                 Section("4 · iPadに戻る") {
-                    Text("マウスの中央ボタン、またはiPad画面の「iPad操作に戻る」で停止します。他のiPadアプリへ移ると転送は停止し、戻っても自動再開しません。")
+                    Text("マウススの中央ボタン、またはiPad画面の「iPad操作に戻る」で停止します。他のiPadアプリへ移ると転送は停止し、戻っても自動再開しません。")
                 }
                 Section("接続できないとき") {
                     Text("Bluetoothの許可、iPhoneのAssistiveTouch、両端末の距離を確認します。古いペアリングが残っている場合は、iPhone側でMouseLinkを登録解除してからペアリングし直してください。接続名や公開実装の対応表だけでは、手元の組み合わせの動作保証にはなりません。")
@@ -164,7 +190,12 @@ struct GuideView: View {
 struct LicenseView: View {
     @Environment(\.dismiss) private var dismiss
     private var text: String {
-        guard let url = Bundle.main.url(forResource: "LICENSE", withExtension: "txt"), let result = try? String(contentsOf: url, encoding: .utf8) else {
+        #if SWIFT_PACKAGE
+        let resources = Bundle.module
+        #else
+        let resources = Bundle.main
+        #endif
+        guard let url = resources.url(forResource: "LICENSE", withExtension: "txt"), let result = try? String(contentsOf: url, encoding: .utf8) else {
             return "AGPL-3.0-only。配布パッケージ内のLICENSE.txtを参照してください。"
         }
         return result
