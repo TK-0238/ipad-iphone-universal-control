@@ -7,7 +7,8 @@ import UIKit
 
 @MainActor
 final class MouseSession: ObservableObject {
-    let bluetooth = HIDPeripheral()
+    let bluetooth: HIDPeripheral
+    let typing: TypingSession
     @Published private(set) var isRelaying = false
     @Published private(set) var mouseName: String?
     @Published private(set) var receivers: [UUID] = []
@@ -30,14 +31,17 @@ final class MouseSession: ObservableObject {
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     init() {
+        let transport = HIDPeripheral()
+        bluetooth = transport
+        typing = TypingSession(sender: transport)
         bluetooth.advertiseLocalName = "MouseLink"
         bluetooth.onMouseWritable = { [weak self] in
             self?.blocked = false
             self?.drain()
         }
         bluetooth.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
-        bluetooth.$mouseReceivers.receive(on: DispatchQueue.main).sink { [weak self] peers in
-            self?.updateReceivers(peers)
+        bluetooth.$mouseReceivers.combineLatest(bluetooth.$keyboardReceivers).receive(on: DispatchQueue.main).sink { [weak self] mouse, keyboard in
+            self?.updateReceivers(mouse, keyboard: keyboard)
         }.store(in: &subscriptions)
         bluetooth.$lastError.compactMap { $0 }.receive(on: DispatchQueue.main).sink { [weak self] error in
             self?.pause(reason: "Bluetooth: \(error)")
@@ -55,7 +59,7 @@ final class MouseSession: ObservableObject {
 
     var canStart: Bool {
         ReceiverPolicy.canStart(foreground: foreground, mouse: mouseName != nil,
-            selectedIsAvailable: selected.map { receivers.contains($0) } ?? false)
+            selectedIsAvailable: selected.map { bluetooth.mouseReceivers.contains($0) } ?? false)
     }
     var bluetoothStatus: String {
         switch bluetooth.state {
@@ -78,6 +82,7 @@ final class MouseSession: ObservableObject {
         selected = id
     }
     func start() {
+        typing.close()
         refreshMouse()
         guard canStart, let peer = selected, let mouse = GCMouse.current ?? GCMouse.mice().first else {
             message = "マウスと受信先iPhoneの接続を確認してください。"; return
@@ -114,7 +119,13 @@ final class MouseSession: ObservableObject {
         message = "iPhoneへ転送中。中央ボタンを押すとiPad操作に戻ります。"
         drain()
     }
+    func openTyping() {
+        pause(reason: "文字入力画面ではiPad側のマウスを操作します。")
+        bluetooth.stop()
+        typing.open(peer: selected)
+    }
     func pause(reason: String = "転送を停止しました。") {
+        typing.cancel(reason: reason)
         detachMouse()
         isRelaying = false; held = 0; motion = MotionAccumulator(); pointerGate.stop()
         buffer.pause(at: now)
@@ -128,6 +139,7 @@ final class MouseSession: ObservableObject {
     }
     func setForeground(_ value: Bool) {
         foreground = value
+        typing.setForeground(value)
         if !value {
             pause(reason: "アプリが非アクティブになったため停止しました。")
             // Background suspension can prevent the timer or write-ready callback from running.
@@ -140,13 +152,14 @@ final class MouseSession: ObservableObject {
         let name = mouse.map { $0.vendorName ?? "接続済みマウス" }
         if name != mouseName { mouseName = name }
     }
-    private func updateReceivers(_ peers: Set<UUID>) {
+    private func updateReceivers(_ peers: Set<UUID>, keyboard: Set<UUID>) {
         if isRelaying, let id = buffer.peer, !peers.contains(id) {
             pause(reason: "iPhoneとの接続が切れたため停止しました。")
             buffer.disconnect()
         }
-        selected = ReceiverPolicy.choose(previous: selected, available: peers)
-        receivers = peers.sorted { $0.uuidString < $1.uuidString }
+        let all = peers.union(keyboard)
+        selected = ReceiverPolicy.choose(previous: selected, available: all)
+        receivers = all.sorted { $0.uuidString < $1.uuidString }
     }
     func pointerLockChanged() {
         _ = inputLockReady()

@@ -63,6 +63,7 @@ struct MouseLinkView: View {
     @ObservedObject var session: MouseSession
     @State private var guide = false
     @State private var license = false
+    @State private var typing = false
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -70,6 +71,9 @@ struct MouseLinkView: View {
                     header
                     connection
                     controls
+                    Button { session.openTyping(); typing = true } label: {
+                        Label("文字入力・Enter", systemImage: "keyboard").frame(maxWidth: .infinity).padding(.vertical, 8)
+                    }.buttonStyle(.bordered).accessibilityIdentifier("open-typing")
                     VStack(alignment: .leading, spacing: 12) {
                         Label("操作の感度", systemImage: "slider.horizontal.3").font(.headline)
                         HStack {
@@ -101,6 +105,7 @@ struct MouseLinkView: View {
             } }
             .sheet(isPresented: $guide) { GuideView() }
             .sheet(isPresented: $license) { LicenseView() }
+            .sheet(isPresented: $typing, onDismiss: { session.typing.close() }) { TypingView(session: session.typing) }
         }
     }
     private var header: some View {
@@ -175,7 +180,7 @@ struct GuideView: View {
                     Text("iPadで受信先を選び、「iPhoneの操作を開始」を押します。移動・左クリック・右クリック・ホイールをBluetoothで直接送ります。iPhone側にこのアプリをインストールする必要はありません。")
                 }
                 Section("4 · iPadに戻る") {
-                    Text("マウススの中央ボタン、またはiPad画面の「iPad操作に戻る」で停止します。他のiPadアプリへ移ると転送は停止し、戻っても自動再開しません。")
+                    Text("マウスの中央ボタン、またはiPad画面の「iPad操作に戻る」で停止します。他のiPadアプリへ移ると転送は停止し、戻っても自動再開しません。")
                 }
                 Section("接続できないとき") {
                     Text("Bluetoothの許可、iPhoneのAssistiveTouch、両端末の距離を確認します。古いペアリングが残っている場合は、iPhone側でMouseLinkを登録解除してからペアリングし直してください。接続名や公開実装の対応表だけでは、手元の組み合わせの動作保証にはなりません。")

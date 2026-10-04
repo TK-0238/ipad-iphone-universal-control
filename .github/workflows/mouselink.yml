@@ -16,7 +16,7 @@ jobs:
       - name: MouseLink core suite
         run: swift test --package-path MouseLink
       - name: Package offline iPad source
-        run: python3 MouseLink/tools/package_app.py
+        run: python3 MouseLink/tools/package_keyboard_app.py
       - name: Generate native project
         run: |
           command -v xcodegen || brew install xcodegen
