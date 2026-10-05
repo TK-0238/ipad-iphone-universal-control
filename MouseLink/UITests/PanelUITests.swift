@@ -93,30 +93,21 @@ final class SplitWindowUITests:XCTestCase {
         XCTAssertFalse(app.buttons["panel-enable"].isEnabled)
         capture("panel-real-split-view")
 
-        // Drag the OS-owned split divider, not an artificial app preview, to the narrow size.
-        let win = app.windows.firstMatch
-        let before = win.frame
-        let systemFrame = spring.frame
-        let safariFrame = safari.windows.firstMatch.frame
-        let dividerX = (before.maxX + safariFrame.minX) / 2
-        // The divider belongs to SpringBoard, not MouseLink's 600pt-wide window.
-        // App-anchored coordinates target that process and are transformed using the
-        // app window size. Use the system's full-screen coordinate space instead.
-        let screenOrigin = spring.coordinate(withNormalizedOffset: .zero)
-        let seam = screenOrigin.withOffset(CGVector(dx: dividerX - systemFrame.minX,
-                                                    dy: systemFrame.height / 2))
-        let destination = screenOrigin.withOffset(CGVector(dx: systemFrame.width * 0.28,
-                                                           dy: systemFrame.height / 2))
-        let positions = XCTAttachment(string: "system=\(systemFrame) mouseLink=\(before) safari=\(safariFrame) dividerX=\(dividerX)")
-        positions.name="panel-divider-coordinates"; positions.lifetime = .keepAlways; add(positions)
-        seam.press(forDuration: 0.6, thenDragTo: destination)
-        capture("panel-after-system-divider-drag")
+        // Resize real OS windows by rotating the device, not by shrinking a test host.
+        // The SpringBoard divider drag in run 18 left both windows at 600pt; it did
+        // not exercise this app's resizing at all. Rotation is a public, deterministic
+        // XCTest device action. Keep the narrow-width requirement and verify both apps.
+        let before = app.windows.firstMatch.frame
+        XCUIDevice.shared.orientation = .portrait
         let narrow = XCTNSPredicateExpectation(predicate: NSPredicate { _,_ in
-            app.windows.firstMatch.frame.width < fullWidth * 0.45
+            let frame = app.windows.firstMatch.frame
+            return frame.height > frame.width && frame.width >= 300 && frame.width <= 420 &&
+                frame.width < before.width && safari.windows.firstMatch.frame.width > 100
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [narrow], timeout: 10), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [narrow], timeout: 15), .completed)
         let frame = app.windows.firstMatch.frame
         XCTAssertGreaterThanOrEqual(frame.width, 300)
+        XCTAssertLessThanOrEqual(frame.width, 420)
         XCTAssertTrue(pad.isHittable)
         XCTAssertGreaterThanOrEqual(pad.frame.minX, frame.minX)
         XCTAssertLessThanOrEqual(pad.frame.maxX, frame.maxX)
@@ -137,5 +128,16 @@ final class SplitWindowUITests:XCTestCase {
         XCTAssertTrue(app.buttons["panel-stop"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["panel-enable"].isEnabled)
         capture("panel-narrow-return")
+        // Resize back with Safari still beside us. Neither resize grants input permission.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let wider = XCTNSPredicateExpectation(predicate: NSPredicate { _,_ in
+            app.windows.firstMatch.frame.width > frame.width &&
+                app.windows.firstMatch.frame.width < fullWidth * 0.8 &&
+                safari.windows.firstMatch.frame.width > 100
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [wider], timeout: 15), .completed)
+        XCTAssertTrue(app.buttons["panel-typing"].isHittable)
+        XCTAssertFalse(app.buttons["panel-enable"].isEnabled)
+        capture("panel-split-after-rotation-back")
     }
 }
