@@ -61,6 +61,10 @@ final class PhoneLayoutUITests: XCTestCase {
         XCTAssertTrue(field.exists); field.tap()
         finishKeyboardOnboardingIfPresent(app)
         field.tap(); field.typeText(text)
+        // typeText may switch the software keyboard's input source and present
+        // QuickPath onboarding AFTER the initial focus check (run24 evidence).
+        // Dismiss that specific system tutorial before touching the app toolbar.
+        finishKeyboardOnboardingIfPresent(app)
         XCTAssertEqual(field.value as? String, text)
         XCTAssertFalse(app.buttons["send-text-enter"].isEnabled)
         // With keyboard setup completed, use the app's own accessory to dismiss.
