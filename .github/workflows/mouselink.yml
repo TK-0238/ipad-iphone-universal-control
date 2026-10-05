@@ -107,6 +107,17 @@ jobs:
           xcrun xcresulttool export attachments --path MouseLink/out/PhoneUI.xcresult --output-path MouseLink/out/phone-screenshots || true
           xcrun simctl shutdown "$PHONE"
           exit "$PHONE_STATUS"
+      - name: Reject SwiftUI view-update runtime warnings
+        run: |
+          set -euo pipefail
+          for log in regressions ui-test split-view phone-ui; do
+            test -s "MouseLink/out/$log.log"
+            if grep -nE 'Publishing changes from within view updates|Modifying state during view update' "MouseLink/out/$log.log"; then
+              echo "Unexpected SwiftUI view-update warning in $log.log"
+              exit 1
+            fi
+          done
+          echo 'SwiftUI view-update warnings: 0'
       - name: Upload source and evidence
         if: always()
         uses: actions/upload-artifact@v4

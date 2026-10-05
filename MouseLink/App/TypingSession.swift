@@ -18,10 +18,12 @@ protocol KeyboardSending: AnyObject {
 final class TypingSession: ObservableObject {
     @Published var draft = ""
     @Published var mode: KeyboardTextMode = .ascii
-    @Published private(set) var isSending = false
-    @Published private(set) var available = false
-    @Published private(set) var status = "iPhone側で入力欄を選び、文字転送またはEnterを押してください。"
-    @Published private(set) var remaining = 0
+    private(set) var isSending = false { didSet { if oldValue != isSending { schedulePresentationUpdate() } } }
+    private(set) var available = false { didSet { if oldValue != available { schedulePresentationUpdate() } } }
+    private(set) var status = "iPhone側で入力欄を選び、文字転送またはEnterを押してください。" {
+        didSet { if oldValue != status { schedulePresentationUpdate() } }
+    }
+    private(set) var remaining = 0 { didSet { if oldValue != remaining { schedulePresentationUpdate() } } }
     private(set) var peer: UUID?
     private let sender: KeyboardSending
     private let clock: () -> TimeInterval
@@ -30,6 +32,8 @@ final class TypingSession: ObservableObject {
     private var transaction = KeyboardTransaction()
     private var transactionEpoch: UInt64?
     private var pumping = false
+    private var cancelling = false
+    private var presentationUpdateQueued = false
     private var operation: UInt64 = 0
     private var foreground = true
     private var opened = false
@@ -53,7 +57,7 @@ final class TypingSession: ObservableObject {
                 .store(in: &lifecycleSubscriptions)
         }
     }
-    var canSend: Bool { opened && available && !isSending && foreground && inputSurfaceCheck() }
+    var canSend: Bool { !cancelling && opened && available && !isSending && foreground && inputSurfaceCheck() }
 
     /// The visible typing view owns this authorization; construction alone never grants it.
     func bindInputSurface(owner: UUID, check: @escaping () -> Bool) {
@@ -82,6 +86,7 @@ final class TypingSession: ObservableObject {
         return try? KeyboardPlan.text(draft,mode:mode,enter:false).wireText
     }
     func open(peer: UUID?) {
+        guard !cancelling else { return }
         cancel()
         self.peer=peer;opened=true
         refreshAvailability()
@@ -94,16 +99,20 @@ final class TypingSession: ObservableObject {
         refreshAvailability()
     }
     func sendDraft(enter: Bool) {
+        guard !cancelling else { return }
         do { try begin(KeyboardPlan.text(draft,mode:mode,enter:enter)) }
         catch { status=error.localizedDescription }
     }
     func sendKey(_ stroke: KeyboardStroke) {
+        guard !cancelling else { return }
         do { try begin(.key(stroke)) } catch { status=error.localizedDescription }
     }
     func sendCharacter(_ character: String) {
+        guard !cancelling else { return }
         do { try begin(KeyboardPlan.text(character,mode:.ascii,enter:false)) } catch { status=error.localizedDescription }
     }
     private func begin(_ plan: KeyboardPlan) throws {
+        guard !cancelling else { throw KeyboardError.busy }
         refreshAvailability()
         guard opened, available, foreground, let peer else { status="iPhoneとの接続と文字入力ウインドウを確認してください。入力は送信されていません。";return }
         try transaction.begin(plan,peer:peer,at:clock())
@@ -113,6 +122,10 @@ final class TypingSession: ObservableObject {
         pump()
     }
     func cancel(reason: String = "文字転送を中止しました。自動再送はしません。") {
+        // A transport callback can reenter public APIs while the release is being sent.
+        // Do not permit a new transaction until this cancellation is fully committed.
+        guard !cancelling else { return }
+        cancelling=true; defer { cancelling=false }
         operation &+= 1
         let sameConnection = transactionEpoch == sender.inputEpoch
         if let peer=transaction.cancel() {
@@ -143,7 +156,14 @@ final class TypingSession: ObservableObject {
         guard let report=transaction.due(at:time),let target=transaction.peer else { return }
         let currentOperation=operation
         let result=sender.sendKeyboardBytes(report.data,to:target)
-        guard currentOperation == operation, transactionEpoch == sender.inputEpoch else { return }
+        guard currentOperation == operation else { return }
+        // The write may synchronously change the connection or window state. Observe
+        // that loss NOW, even if permission returns before the next timer tick.
+        refreshAvailability()
+        guard opened, foreground, available, transactionEpoch == sender.inputEpoch else {
+            cancel(reason:"送信中に接続または操作ウインドウが変わったため停止しました。自動再送はしません。")
+            return
+        }
         switch result {
         case .accepted:
             transaction.accept(at:time);remaining=transaction.remaining
@@ -153,6 +173,18 @@ final class TypingSession: ObservableObject {
             }
         case .busy: break
         case .unavailable: cancel(reason:"受信先が見つからないため停止しました。未送信の文字とEnterは破棄しました。")
+        }
+    }
+    /// Input state above is authoritative and changes synchronously. Only SwiftUI's
+    /// invalidation is deferred; no report, permission, or state snapshot is queued.
+    /// Keep draft/mode @Published so normal editing retains its standard bindings.
+    private func schedulePresentationUpdate() {
+        guard !presentationUpdateQueued else { return }
+        presentationUpdateQueued=true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.presentationUpdateQueued=false
+            self.objectWillChange.send()
         }
     }
     private func refreshAvailability() {

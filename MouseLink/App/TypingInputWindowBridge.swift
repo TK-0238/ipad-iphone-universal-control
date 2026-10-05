@@ -16,10 +16,15 @@ enum InputWindowState {
         // UIScrollView's nonzero bounds origin. Only clipping ancestors restrict overflow.
         var visible = view.bounds
         guard hasArea(visible) else { return false }
+        var effectiveAlpha: CGFloat = 1
         var current: UIView? = view
         while let item=current {
             if item.isHidden || !item.alpha.isFinite || item.alpha <= 0.01 ||
                 item.traitCollection.activeAppearance == .inactive { return false }
+            // Ancestor alpha is multiplicative; individually visible layers can
+            // compose into a practically invisible input surface.
+            effectiveAlpha *= item.alpha
+            guard effectiveAlpha.isFinite, effectiveAlpha > 0.01 else { return false }
             if item.clipsToBounds || item === window {
                 visible = visible.intersection(item.bounds)
                 guard hasArea(visible) else { return false }
