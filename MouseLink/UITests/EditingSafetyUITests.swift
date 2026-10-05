@@ -1,5 +1,10 @@
 import XCTest
 final class EditingSafetyUITests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+    }
     private func openTyping(large:Bool=false) -> XCUIApplication {
         let app=XCUIApplication();app.launchArguments += ["-AppleLanguages","(ja)","-AppleLocale","ja_JP"]
         if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName","UICTContentSizeCategoryAccessibilityXXXL"] }
@@ -8,7 +13,7 @@ final class EditingSafetyUITests: XCTestCase {
         app.buttons["open-typing"].tap();XCTAssertTrue(app.buttons["close-typing"].waitForExistence(timeout:5));return app
     }
     private func capture(_ app:XCUIApplication,_ name:String) {
-        let image=XCTAttachment(screenshot:app.screenshot());image.name=name;image.lifetime = .keepAlways;add(image)
+        let image=XCTAttachment(screenshot:XCUIScreen.main.screenshot());image.name=name;image.lifetime = .keepAlways;add(image)
     }
     func testDraftSurvivesCloseAndReopenWithoutAnyAutomaticSending() {
         let app=openTyping();let field=app.descendants(matching:.any).matching(identifier:"typing-draft").firstMatch
@@ -29,18 +34,36 @@ final class EditingSafetyUITests: XCTestCase {
         XCTAssertFalse(app.buttons["send-text-enter"].isEnabled)
     }
     func testLandscapeTypingAndEnterRemainAccessible() {
+        let app=openTyping()
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
-        let app=openTyping()
-        XCTAssertTrue(app.buttons["close-typing"].isHittable)
+        let landscape = XCTNSPredicateExpectation(predicate: NSPredicate { _,_ in
+            app.frame.width > app.frame.height
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 10), .completed)
+        let window = app.windows.firstMatch.frame
+        let close = app.buttons["close-typing"]
+        XCTAssertTrue(close.isHittable)
+        XCTAssertTrue(window.contains(close.frame))
         for _ in 0..<5 where !app.buttons["remote-enter"].isHittable { app.swipeUp() }
         XCTAssertTrue(app.buttons["remote-enter"].exists);XCTAssertFalse(app.buttons["remote-enter"].isEnabled)
-        capture(app,"qa-landscape")
+        XCTAssertTrue(window.intersects(app.buttons["remote-enter"].frame))
+        let enterFrame = app.buttons["remote-enter"].frame
+        let geometry = XCTAttachment(string: "Application: \(app.frame); window: \(window); close: \(close.frame); Enter: \(enterFrame)")
+        geometry.name = "qa-landscape-geometry"; geometry.lifetime = .keepAlways; add(geometry)
+        capture(app,"qa-landscape-full-screen")
     }
     func testAccessibilityTextSizeCanCloseTypingScreen() {
         let app=openTyping(large:true)
         XCTAssertTrue(app.buttons["close-typing"].isHittable)
         capture(app,"qa-large-text")
+        let field = app.descendants(matching: .any).matching(identifier: "typing-draft").firstMatch
+        for _ in 0..<12 where !field.isHittable { app.swipeUp() }
+        XCTAssertTrue(field.isHittable)
+        field.tap(); field.typeText("A")
+        XCTAssertTrue((field.value as? String)?.contains("A") == true)
+        if app.buttons["キーボードを閉じる"].isHittable { app.buttons["キーボードを閉じる"].tap() }
+        capture(app,"qa-large-text-editable")
         app.buttons["close-typing"].tap();XCTAssertTrue(app.navigationBars["MouseLink"].waitForExistence(timeout:5))
     }
 }

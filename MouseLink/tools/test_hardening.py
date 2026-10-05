@@ -28,6 +28,10 @@ class PackagingSafetyTests(unittest.TestCase):
         self.assertNotIn('updateValue(cached',subscribe)
         self.assertIn('initialReports.append((central.identifier',subscribe)
         self.assertIn('onSubscribedCentrals: [central]',body(self.source,'func flushInitialReports('))
+    def test_duplicate_subscription_cannot_inject_another_baseline(self):
+        subscribe=body(self.source,'didSubscribeTo characteristic:')
+        self.assertIn('subscribedCentrals[central.identifier]?.contains(ObjectIdentifier(characteristic)) != true',subscribe)
+        self.assertLess(subscribe.index('subscribedCentrals[central.identifier]?.contains'),subscribe.index('initialReports.append'))
     def test_control_point_is_writable(self):
         declaration=self.source.split('type: HIDProfile.hidControlPoint,',1)[1].split(')',1)[0]
         self.assertIn('properties: .writeWithoutResponse',declaration)

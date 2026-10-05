@@ -95,6 +95,8 @@ def harden(text):
         didSubscribeTo characteristic: CBCharacteristic
     ) {
         guard peripheral === pManager, currentCharacteristic(characteristic) else { return }
+        // Duplicate callbacks must not inject a neutral report into a held key or drag.
+        guard subscribedCentrals[central.identifier]?.contains(ObjectIdentifier(characteristic)) != true else { return }
         _trackInteraction(from: central)
         subscribedCentrals[central.identifier, default: []].insert(ObjectIdentifier(characteristic))
         if let endpoint = endpoint(for: characteristic) {
