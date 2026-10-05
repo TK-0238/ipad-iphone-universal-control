@@ -96,11 +96,21 @@ final class SplitWindowUITests:XCTestCase {
         // Drag the OS-owned split divider, not an artificial app preview, to the narrow size.
         let win = app.windows.firstMatch
         let before = win.frame
-        let seam = win.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
-            .withOffset(CGVector(dx: 4, dy: 0))
-        let destination = win.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: fullWidth / 3 - before.minX, dy: before.height / 2))
-        seam.press(forDuration: 0.3, thenDragTo: destination)
+        let systemFrame = spring.frame
+        let safariFrame = safari.windows.firstMatch.frame
+        let dividerX = (before.maxX + safariFrame.minX) / 2
+        // The divider belongs to SpringBoard, not MouseLink's 600pt-wide window.
+        // App-anchored coordinates target that process and are transformed using the
+        // app window size. Use the system's full-screen coordinate space instead.
+        let screenOrigin = spring.coordinate(withNormalizedOffset: .zero)
+        let seam = screenOrigin.withOffset(CGVector(dx: dividerX - systemFrame.minX,
+                                                    dy: systemFrame.height / 2))
+        let destination = screenOrigin.withOffset(CGVector(dx: systemFrame.width * 0.28,
+                                                           dy: systemFrame.height / 2))
+        let positions = XCTAttachment(string: "system=\(systemFrame) mouseLink=\(before) safari=\(safariFrame) dividerX=\(dividerX)")
+        positions.name="panel-divider-coordinates"; positions.lifetime = .keepAlways; add(positions)
+        seam.press(forDuration: 0.6, thenDragTo: destination)
+        capture("panel-after-system-divider-drag")
         let narrow = XCTNSPredicateExpectation(predicate: NSPredicate { _,_ in
             app.windows.firstMatch.frame.width < fullWidth * 0.45
         }, object: nil)
