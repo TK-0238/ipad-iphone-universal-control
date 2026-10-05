@@ -41,6 +41,20 @@ jobs:
           xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release -derivedDataPath MouseLink/DeviceDerivedData CODE_SIGNING_ALLOWED=NO build > MouseLink/out/device-release-build.log 2>&1 || { tail -100 MouseLink/out/device-release-build.log; exit 1; }
           tail -6 MouseLink/out/build.log
           tail -6 MouseLink/out/device-release-build.log
+      - name: Native safety regressions before UI
+        id: regressions
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > MouseLink/out/devices.json
+          DEVICE=$(python3 -c 'import json; d=json.load(open("MouseLink/out/devices.json")); print(next(x["udid"] for ds in d["devices"].values() for x in ds if "iPad Pro" in x["name"] and x.get("isAvailable",False)))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          set +e
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MouseLinkNativeTests/TypingReentrancyRegressionTests -only-testing:MouseLinkNativeTests/TypingPresentationRegressionTests -only-testing:MouseLinkNativeTests/InputOpacityRegressionTests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/Regressions.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/regressions.log 2>&1
+          STATUS=$?
+          set -e
+          tail -120 MouseLink/out/regressions.log
+          exit "$STATUS"
       - name: Native iPad safety and UI tests with screenshots
         run: |
           set -euo pipefail
@@ -67,8 +81,7 @@ jobs:
             xcrun simctl io "$DEVICE" screenshot MouseLink/out/ux-workspace-dark.png
             xcrun simctl ui "$DEVICE" appearance light
           fi
-          # Independent real Split View evidence is collected even if a preceding UI test fails.
-          # Preserve the failure status: a later success must not mask it.
+          # Collect Split View even on a normal UI failure; preserve earlier failure.
           set +e
           xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MouseLinkUITests/SplitWindowUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/SplitView.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/split-view.log 2>&1
           SPLIT_STATUS=$?
@@ -79,7 +92,7 @@ jobs:
           xcrun simctl shutdown "$DEVICE"
           exit "$TEST_STATUS"
       - name: iPhone-sized app UI portrait landscape and large text
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.regressions.outcome == 'success' }}
         run: |
           set -euo pipefail
           PHONE=$(python3 -c 'import json; d=json.load(open("MouseLink/out/devices.json")); print(next(x["udid"] for ds in d["devices"].values() for x in ds if x["name"] == "iPhone 16" and x.get("isAvailable",False)))')
@@ -108,6 +121,7 @@ jobs:
             MouseLink/out/*.png
             MouseLink/out/ui-screenshots
             MouseLink/out/UITests.xcresult
+            MouseLink/out/Regressions.xcresult
             MouseLink/out/split-screenshots
             MouseLink/out/SplitView.xcresult
             MouseLink/out/phone-screenshots
