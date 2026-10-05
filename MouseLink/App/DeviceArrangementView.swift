@@ -24,7 +24,8 @@ struct DeviceArrangementView: View {
         }.frame(height:260)
             // Only schematic labels are capped. Outside controls retain the user's full text size.
             .dynamicTypeSize(...DynamicTypeSize.large)
-            .accessibilityIdentifier("device-arrangement")
+            // A container identifier is inherited by SwiftUI descendants and can mask
+            // the phone/drag-handle identifiers. Keep identifiers on the controls only.
     }
     private func tablet(width:CGFloat) -> some View {
         VStack(spacing:12) {
