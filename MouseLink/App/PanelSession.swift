@@ -19,9 +19,12 @@ extension HIDPeripheral: PanelMouseSending {
 /// A local, visible control surface. No GCMouse handlers and no pointer lock are installed here.
 @MainActor
 final class PanelSession: ObservableObject {
-    @Published private(set) var isEnabled = false
-    @Published private(set) var isInside = false
-    @Published private(set) var status = "他のアプリの隣に置き、パッドを有効にしてください。"
+    let objectWillChange = ObservableObjectPublisher()
+    private(set) var isEnabled = false { willSet { if newValue != isEnabled { notifyPresentation() } } }
+    private(set) var isInside = false { willSet { if newValue != isInside { notifyPresentation() } } }
+    private(set) var status = "他のアプリの隣に置き、パッドを有効にしてください。" {
+        willSet { if newValue != status { notifyPresentation() } }
+    }
     var surfaceIsUsable: () -> Bool = { false }
     var sensitivity: Double = 1
     var reverseScroll = false
@@ -35,6 +38,9 @@ final class PanelSession: ObservableObject {
     private var pumping = false
     private var disabling = false
     private var leaving = false
+    private var inputSurfaceOwner: UUID?
+    private var presentationDeferralDepth = 0
+    private var presentationUpdateQueued = false
     private var subscriptions = Set<AnyCancellable>()
 
     init(sender: PanelMouseSending, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
@@ -45,6 +51,47 @@ final class PanelSession: ObservableObject {
             NotificationCenter.default.publisher(for:name,object:UIApplication.shared).sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.setForeground(false) }
             }.store(in:&subscriptions)
+        }
+    }
+    /// A newly allocated view has no authority until it is attached to a window.
+    /// Replacing the actual surface revokes the previous visit before granting ownership;
+    /// ownership alone does not enable remote input.
+    func bindInputSurface(owner: UUID, check: @escaping () -> Bool) {
+        guard !disabling, !leaving, inputSurfaceOwner != owner else { return }
+        fromViewLifecycle {
+            disable()
+            inputSurfaceOwner = owner
+            surfaceIsUsable = check
+        }
+    }
+    func ownsInputSurface(_ owner: UUID) -> Bool { inputSurfaceOwner == owner }
+    func unbindInputSurface(owner: UUID) {
+        guard ownsInputSurface(owner) else { return }
+        fromViewLifecycle {
+            inputSurfaceOwner = nil
+            surfaceIsUsable = { false }
+            disable(reason: "操作パッドが非表示になったため停止しました。")
+        }
+    }
+    func invalidateInputSurface(owner: UUID, reason: String) {
+        guard ownsInputSurface(owner) else { return }
+        fromViewLifecycle { disable(reason: reason) }
+    }
+    /// Revoke input and release held buttons synchronously, including during UIKit
+    /// attachment/layout/removal. Only the SwiftUI redraw notification is deferred.
+    private func fromViewLifecycle(_ change: () -> Void) {
+        presentationDeferralDepth += 1
+        defer { presentationDeferralDepth -= 1 }
+        change()
+    }
+    private func notifyPresentation() {
+        guard presentationDeferralDepth > 0 else { objectWillChange.send(); return }
+        guard !presentationUpdateQueued else { return }
+        presentationUpdateQueued = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.presentationUpdateQueued = false
+            self.objectWillChange.send()
         }
     }
     func enable(peer: UUID?) {
@@ -87,7 +134,7 @@ final class PanelSession: ObservableObject {
         finishStroke()
     }
     func disable(reason:String? = nil) {
-        // Close the gate before @Published willSet or transport callbacks can reenter.
+        // Close the gate before presentation notifications or transport callbacks can reenter.
         // A real window loss may still disable an in-progress leave.
         guard !disabling else { return }
         disabling=true; defer { disabling=false }

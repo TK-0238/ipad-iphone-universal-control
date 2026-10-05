@@ -7,7 +7,7 @@ struct PanelPadView: UIViewRepresentable {
     @ObservedObject var panel: PanelSession
     func makeUIView(context: Context) -> LocalPadView { LocalPadView(panel:panel) }
     func updateUIView(_ view: LocalPadView, context: Context) { view.refreshLabel() }
-    static func dismantleUIView(_ view: LocalPadView, coordinator: ()) { view.panel?.disable() }
+    static func dismantleUIView(_ view: LocalPadView, coordinator: ()) { view.dismantle() }
 }
 
 /// UIKit routes events to this view. There is intentionally no global/raw mouse capture.
@@ -21,6 +21,10 @@ final class LocalPadView: UIView {
     private var origin:CGPoint = .zero
     private var moved = false
     private var cancelled = false
+    private let owner = UUID()
+    private weak var boundWindow: UIWindow?
+    private var dismantled = false
+    private var isCurrentSurface: Bool { !dismantled && panel?.ownsInputSurface(owner) == true }
 
     init(panel:PanelSession) {
         self.panel=panel
@@ -45,50 +49,72 @@ final class LocalPadView: UIView {
         let wheel=UIPanGestureRecognizer(target:self,action:#selector(scrolled(_:)))
         wheel.allowedScrollTypesMask = .all;wheel.allowedTouchTypes=[];wheel.cancelsTouchesInView=false
         addGestureRecognizer(wheel)
-        panel.surfaceIsUsable={ [weak self] in self?.usable == true }
         for name in [UIWindow.didResignKeyNotification,UIScene.willDeactivateNotification] {
             observers.append(NotificationCenter.default.addObserver(forName:name,object:nil,queue:.main) { [weak self] note in
                 MainActor.assumeIsolated {
-                    guard let self, let own = self.window else { return }
+                    guard let self, self.isCurrentSurface, let own = self.window else { return }
                     if (note.object as? UIWindow) === own || (note.object as? UIScene) === own.windowScene {
-                        self.panel?.disable(reason:"操作ウインドウが非アクティブになったため停止しました。")
+                        self.panel?.invalidateInputSurface(owner:self.owner,reason:"操作ウインドウが非アクティブになったため停止しました。")
                         self.cancelled=true
                     }
                 }
             })
         }
         registerForTraitChanges([UITraitActiveAppearance.self]) { (view: LocalPadView, _: UITraitCollection) in
-            if !view.usable { view.panel?.disable();view.cancelled=true }
+            if view.isCurrentSurface && !view.usable {
+                view.panel?.invalidateInputSurface(owner:view.owner,reason:"操作パッドの表示状態が変わったため停止しました。")
+                view.cancelled=true
+            }
         }
         refreshLabel()
     }
     @available(*,unavailable) required init?(coder:NSCoder) { fatalError("No storyboard") }
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
     var usable:Bool {
-        InputWindowState.allowsInput(in:self) && bounds.width > 0 && bounds.height > 0
+        isCurrentSurface && InputWindowState.allowsInput(in:self) && bounds.width > 0 && bounds.height > 0
     }
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { panel?.disable(reason:"操作パッドが非表示になったため停止しました。") }
+        guard !dismantled else { return }
+        guard let window else { detach(); return }
+        guard boundWindow !== window else { return }
+        detach()
+        boundWindow = window
+        panel?.bindInputSurface(owner:owner) { [weak self] in self?.usable == true }
+    }
+    private func detach() {
+        panel?.unbindInputSurface(owner:owner)
+        boundWindow=nil; tracked=nil; cancelled=true
+    }
+    func dismantle() {
+        dismantled=true
+        detach()
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers.removeAll()
     }
     override func layoutSubviews() {
         super.layoutSubviews()
-        if lastSize != .zero && lastSize != bounds.size { panel?.geometryChanged();tracked=nil;cancelled=true }
+        if isCurrentSurface && lastSize != .zero && lastSize != bounds.size {
+            panel?.invalidateInputSurface(owner:owner,reason:"ウインドウの大きさが変わったため停止しました。")
+            tracked=nil;cancelled=true
+        }
         lastSize=bounds.size
         layer.borderColor=UIColor.separator.cgColor
     }
     func refreshLabel() {
-        let enabled=panel?.isEnabled == true
+        let enabled=isCurrentSurface && panel?.isEnabled == true
         label.text=enabled ? "iPhone操作パッド\n移動・クリック・ホイール" : "操作パッド\n接続後に有効にしてください"
         label.textColor=enabled ? .label : .secondaryLabel
         accessibilityValue=enabled ? "有効" : "停止中"
         accessibilityTraits=enabled ? [.allowsDirectInteraction] : [.notEnabled]
     }
     private func point(_ p:CGPoint, externalButtonsDown:Bool = false) {
+        guard isCurrentSurface else { return }
         guard usable else { panel?.disable(); return }
         panel?.move(x:p.x,y:p.y,width:bounds.width,height:bounds.height,externalButtonsDown:externalButtonsDown)
     }
     @objc private func hovered(_ g:UIHoverGestureRecognizer) {
+        guard isCurrentSurface else { return }
         switch g.state {
         case .began,.changed:
             let input=(GCMouse.current ?? GCMouse.mice().first)?.mouseInput
@@ -99,7 +125,7 @@ final class LocalPadView: UIView {
         }
     }
     @objc private func scrolled(_ g:UIPanGestureRecognizer) {
-        guard g.state == .began || g.state == .changed else { return }
+        guard isCurrentSurface, g.state == .began || g.state == .changed else { return }
         point(g.location(in:self))
         let delta=g.translation(in:self);g.setTranslation(.zero,in:self)
         panel?.scroll(-delta.y/12)
@@ -111,13 +137,14 @@ final class LocalPadView: UIView {
         if t.type == .indirectPointer { panel?.buttons(UInt8((event?.buttonMask.rawValue ?? 1) & 3)) }
     }
     override func touchesMoved(_ touches:Set<UITouch>,with event:UIEvent?) {
-        guard let t=tracked,touches.contains(t),!cancelled else { return }
+        guard isCurrentSurface,let t=tracked,touches.contains(t),!cancelled else { return }
         let p=t.location(in:self)
         if hypot(p.x-origin.x,p.y-origin.y) > 6 { moved=true }
         point(p)
         if panel?.isInside != true { cancelled=true;panel?.leave() }
     }
     override func touchesEnded(_ touches:Set<UITouch>,with event:UIEvent?) {
+        guard isCurrentSurface else { tracked=nil;cancelled=true;return }
         guard let t=tracked,touches.contains(t) else { return }
         let p=t.location(in:self)
         if !cancelled,bounds.contains(p),usable {
@@ -128,6 +155,6 @@ final class LocalPadView: UIView {
         tracked=nil
     }
     override func touchesCancelled(_ touches:Set<UITouch>,with event:UIEvent?) {
-        tracked=nil;cancelled=true;panel?.leave()
+        tracked=nil;cancelled=true;if isCurrentSurface { panel?.leave() }
     }
 }

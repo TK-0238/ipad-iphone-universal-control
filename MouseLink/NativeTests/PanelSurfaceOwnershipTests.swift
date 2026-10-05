@@ -70,7 +70,11 @@ final class PanelSurfaceOwnershipTests: XCTestCase {
     func testAttachingReplacementReleasesOldDragAndRequiresExplicitEnable() throws {
         let (panel, sender, root, old) = try fixture()
         let next = LocalPadView(panel: panel)
+        var changes = 0
+        let token = panel.objectWillChange.sink { changes += 1 }
+        defer { token.cancel() }
         next.frame = CGRect(x: 20, y: 260, width: 320, height: 200); root.addSubview(next)
+        XCTAssertEqual(changes, 0, "UIKit attachment must not publish during a possible SwiftUI view update")
         XCTAssertFalse(panel.isEnabled)
         XCTAssertFalse(panel.isInside)
         XCTAssertEqual(sender.writes.last, .zero)
@@ -116,7 +120,11 @@ final class PanelSurfaceOwnershipTests: XCTestCase {
     func testDismantlingCurrentPadRevokesPermissionBeforePhysicalRemoval() throws {
         let (panel, sender, _, pad) = try fixture()
         sender.writes = []
+        var changes = 0
+        let token = panel.objectWillChange.sink { changes += 1 }
+        defer { token.cancel() }
         PanelPadView.dismantleUIView(pad, coordinator: ())
+        XCTAssertEqual(changes, 0, "Cleanup cancels synchronously but redraw notification waits")
         XCTAssertNotNil(pad.window, "Dismantle precedes physical removal")
         XCTAssertEqual(sender.writes, [.zero])
         XCTAssertFalse(pad.usable); XCTAssertFalse(panel.surfaceIsUsable())
@@ -139,4 +147,38 @@ final class PanelSurfaceOwnershipTests: XCTestCase {
         XCTAssertEqual(sender.disconnects, 1)
         XCTAssertFalse(panel.isEnabled); XCTAssertEqual(sender.writes.last, .zero)
     }
+    func testDeferredRedrawArrivesWithoutRestoringRevokedInput() async throws {
+        let (panel, sender, _, pad) = try fixture()
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { done.resume() }
+        }
+        var changes = 0
+        let token = panel.objectWillChange.sink { changes += 1 }
+        defer { token.cancel() }
+        sender.writes = []
+        PanelPadView.dismantleUIView(pad, coordinator: ())
+        XCTAssertEqual(changes, 0)
+        XCTAssertEqual(sender.writes, [.zero])
+        XCTAssertFalse(panel.isEnabled)
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { done.resume() }
+        }
+        XCTAssertEqual(changes, 1, "UI redraw is deferred, not suppressed")
+        XCTAssertFalse(panel.isEnabled)
+        XCTAssertFalse(panel.surfaceIsUsable())
+        panel.pump()
+        XCTAssertEqual(sender.writes, [.zero])
+    }
+    func testDismantledViewCannotReclaimReplacementOwnership() throws {
+        let (panel, sender, root, old) = try fixture()
+        let next = replacement(panel, sender, root)
+        PanelPadView.dismantleUIView(old, coordinator: ())
+        old.removeFromSuperview(); root.addSubview(old)
+        old.setNeedsLayout(); old.layoutIfNeeded()
+        XCTAssertFalse(old.usable)
+        XCTAssertTrue(next.usable)
+        XCTAssertTrue(panel.isEnabled); XCTAssertTrue(panel.isInside)
+        XCTAssertTrue(sender.writes.isEmpty)
+    }
+
 }
