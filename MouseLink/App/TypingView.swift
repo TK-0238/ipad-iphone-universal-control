@@ -7,14 +7,17 @@ struct TypingView: View {
     @FocusState private var draftFocused: Bool
     @State private var uppercase=false
     @State private var showKeys=false
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var keyWidth: CGFloat = 110
+    @ScaledMetric(relativeTo: .body) private var characterWidth: CGFloat = 44
     private var validDraft: Bool { !session.draft.isEmpty && session.validation == nil }
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment:.leading,spacing:20) {
-                    Label(session.available ? "iPhoneの入力欄へ転送" : "キーボード受信先が未接続",systemImage:session.available ? "keyboard.badge.ellipsis" : "keyboard")
+                    Label(session.available ? "iPhoneの入力欄へ転送" : "接続・操作ウインドウを確認",systemImage:session.available ? "keyboard.badge.ellipsis" : "keyboard")
                         .font(.headline).accessibilityIdentifier("typing-connection")
-                    Text("iPhoneで入力欄をクリック → マウス中央ボタンでiPadに戻る → この画面で入力します。ここではマウスをiPadの画面操作に使えます。")
+                    Text("iPhoneで入力欄を選んでから、この画面で文章を準備します。転送ボタンを押すまで文字は送信しません。")
                         .font(.subheadline).foregroundStyle(.secondary)
                     Picker("入力する文字",selection:$session.mode) {
                         ForEach(KeyboardTextMode.allCases,id:\.self) { mode in Text(mode.title).tag(mode) }
@@ -37,7 +40,10 @@ struct TypingView: View {
                             Text("送るキー列: \(preview)").font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(3)
                         }
                     }
-                    HStack {
+                    let sendLayout = typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                        : AnyLayout(HStackLayout(spacing: 10))
+                    sendLayout {
                         Button("文字を転送") { draftFocused=false;session.sendDraft(enter:false) }
                             .buttonStyle(.bordered).accessibilityIdentifier("send-text")
                         Button("文字を転送 ＋ Enter") { draftFocused=false;session.sendDraft(enter:true) }
@@ -57,7 +63,7 @@ struct TypingView: View {
                         Text("iPhoneへキーを送る").font(.headline)
                         Text("下のボタンは下書きを送らず、そのキーだけを送ります。Enterの働きは入力先によって異なります（確定・送信・検索・改行など）。")
                             .font(.caption).foregroundStyle(.secondary)
-                        LazyVGrid(columns:[GridItem(.adaptive(minimum:110),spacing:8)],spacing:8) {
+                        LazyVGrid(columns:[GridItem(.adaptive(minimum:keyWidth),spacing:8)],spacing:8) {
                             key("Enter",.enter,"remote-enter")
                             key("Shift + Enter",.shiftEnter,"remote-shift-enter")
                             key("⌫ 削除",.backspace,"remote-backspace")
@@ -76,7 +82,7 @@ struct TypingView: View {
                             Text("iPadのソフトウェアキーボードを使わず、マウスで各キーをクリックすることもできます。")
                                 .font(.caption).foregroundStyle(.secondary)
                             Toggle("大文字を送る",isOn:$uppercase).disabled(session.isSending)
-                            LazyVGrid(columns:[GridItem(.adaptive(minimum:44),spacing:6)],spacing:6) {
+                            LazyVGrid(columns:[GridItem(.adaptive(minimum:characterWidth),spacing:6)],spacing:6) {
                                 ForEach(Array("1234567890qwertyuiopasdfghjklzxcvbnm-.,'"),id:\.self) { char in
                                     let value=uppercase ? String(char).uppercased() : String(char)
                                     Button(value) { draftFocused=false;session.sendCharacter(value) }

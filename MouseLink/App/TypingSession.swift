@@ -85,7 +85,7 @@ final class TypingSession: ObservableObject {
         cancel()
         self.peer=peer;opened=true
         refreshAvailability()
-        status=available ? "文字入力先はiPhone側で選んでください。転送はボタンを押したときだけ行います。" : "キーボード受信先が未接続です。文章の準備はできます。"
+        status=available ? "文字入力先はiPhone側で選んでください。転送はボタンを押したときだけ行います。" : "接続と文字入力ウインドウを確認してください。文章は送信せずに準備できます。"
     }
     func close() { cancel();opened=false;available=false }
     func setForeground(_ active: Bool) {
@@ -105,7 +105,7 @@ final class TypingSession: ObservableObject {
     }
     private func begin(_ plan: KeyboardPlan) throws {
         refreshAvailability()
-        guard opened, available, foreground, let peer else { status="iPhoneのキーボード接続を確認してください。入力は送信されていません。";return }
+        guard opened, available, foreground, let peer else { status="iPhoneとの接続と文字入力ウインドウを確認してください。入力は送信されていません。";return }
         try transaction.begin(plan,peer:peer,at:clock())
         transactionEpoch=sender.inputEpoch;operation &+= 1
         isSending=true;remaining=transaction.remaining

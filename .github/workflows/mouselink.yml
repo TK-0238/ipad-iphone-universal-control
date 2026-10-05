@@ -67,15 +67,15 @@ jobs:
             xcrun simctl io "$DEVICE" screenshot MouseLink/out/ux-workspace-dark.png
             xcrun simctl ui "$DEVICE" appearance light
           fi
-          if [ "$TEST_STATUS" -eq 0 ]; then
-            set +e
-            xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MouseLinkUITests/SplitWindowUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/SplitView.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/split-view.log 2>&1
-            SPLIT_STATUS=$?
-            set -e
-            tail -40 MouseLink/out/split-view.log
-            xcrun xcresulttool export attachments --path MouseLink/out/SplitView.xcresult --output-path MouseLink/out/split-screenshots || true
-            TEST_STATUS=$SPLIT_STATUS
-          fi
+          # Independent real Split View evidence is collected even if a preceding UI test fails.
+          # Preserve the failure status: a later success must not mask it.
+          set +e
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MouseLinkUITests/SplitWindowUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/SplitView.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/split-view.log 2>&1
+          SPLIT_STATUS=$?
+          set -e
+          tail -40 MouseLink/out/split-view.log
+          xcrun xcresulttool export attachments --path MouseLink/out/SplitView.xcresult --output-path MouseLink/out/split-screenshots || true
+          if [ "$TEST_STATUS" -eq 0 ]; then TEST_STATUS=$SPLIT_STATUS; fi
           xcrun simctl shutdown "$DEVICE"
           exit "$TEST_STATUS"
       - name: Upload source and evidence

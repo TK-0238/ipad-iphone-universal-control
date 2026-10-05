@@ -58,7 +58,21 @@ final class EditingSafetyUITests: XCTestCase {
         XCTAssertTrue(app.buttons["close-typing"].isHittable)
         capture(app,"qa-large-text")
         let field = app.descendants(matching: .any).matching(identifier: "typing-draft").firstMatch
-        for _ in 0..<12 where !field.isHittable { app.swipeUp() }
+        // The typing form is a sheet. A full-application swipe can jump over the field.
+        // Use short gestures inside its own scroll view, and reverse direction if needed.
+        let scroll = app.scrollViews.containing(.any, identifier: "typing-draft").firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        for _ in 0..<24 {
+            if field.isHittable { break }
+            let rect = field.frame, viewport = scroll.frame
+            let down = !rect.isEmpty && rect.midY < viewport.midY
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: down ? 0.35 : 0.65))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: down ? 0.55 : 0.45))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        let positions = XCTAttachment(string: "scroll=\(scroll.frame) field=\(field.frame) hittable=\(field.isHittable)")
+        positions.name="qa-large-text-field-geometry"; positions.lifetime = .keepAlways; add(positions)
+        capture(app,"qa-large-text-field-visible")
         XCTAssertTrue(field.isHittable)
         field.tap(); field.typeText("A")
         XCTAssertTrue((field.value as? String)?.contains("A") == true)
