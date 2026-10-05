@@ -24,8 +24,9 @@ jobs:
       - name: Package offline iPad source and verify safety wiring
         run: |
           set -o pipefail
-          python3 MouseLink/tools/package_ux_app.py
+          python3 MouseLink/tools/package_panel_app.py
           python3 MouseLink/tools/test_hardening.py -v 2>&1 | tee MouseLink/out/package-tests.log
+          python3 MouseLink/tools/test_panel_package.py -v 2>&1 | tee MouseLink/out/panel-package-tests.log
           git archive --format=zip --output=MouseLink/out/QA-source.zip HEAD MouseLink .github/workflows/mouselink.yml
           git rev-parse HEAD > MouseLink/out/checkout-sha.txt
       - name: Generate native project
@@ -53,7 +54,7 @@ jobs:
           sleep 3
           xcrun simctl io "$DEVICE" screenshot MouseLink/out/mouselink-ipad.png
           set +e
-          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/UITests.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/ui-test.log 2>&1
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -skip-testing:MouseLinkUITests/SplitWindowUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/UITests.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/ui-test.log 2>&1
           TEST_STATUS=$?
           set -e
           tail -85 MouseLink/out/ui-test.log
@@ -65,6 +66,15 @@ jobs:
             sleep 3
             xcrun simctl io "$DEVICE" screenshot MouseLink/out/ux-workspace-dark.png
             xcrun simctl ui "$DEVICE" appearance light
+          fi
+          if [ "$TEST_STATUS" -eq 0 ]; then
+            set +e
+            xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MouseLinkUITests/SplitWindowUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/SplitView.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/split-view.log 2>&1
+            SPLIT_STATUS=$?
+            set -e
+            tail -40 MouseLink/out/split-view.log
+            xcrun xcresulttool export attachments --path MouseLink/out/SplitView.xcresult --output-path MouseLink/out/split-screenshots || true
+            TEST_STATUS=$SPLIT_STATUS
           fi
           xcrun simctl shutdown "$DEVICE"
           exit "$TEST_STATUS"
@@ -82,3 +92,5 @@ jobs:
             MouseLink/out/*.png
             MouseLink/out/ui-screenshots
             MouseLink/out/UITests.xcresult
+            MouseLink/out/split-screenshots
+            MouseLink/out/SplitView.xcresult

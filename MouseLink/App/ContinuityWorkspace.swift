@@ -4,7 +4,8 @@ import UIKit
 import GameController
 
 /// Native workspace inspired by the arrangement/edge-handoff interaction, not an OS impersonation.
-struct MouseLinkView: View {
+struct FullWorkspaceView: View {
+    let openPanel: () -> Void
     @ObservedObject var session: MouseSession
     @StateObject private var edge: EdgeSwitchController
     @AppStorage("MouseLink.devicePlacement") private var placementRaw = DevicePlacement.right.rawValue
@@ -13,7 +14,8 @@ struct MouseLinkView: View {
     private var placement: DevicePlacement { DevicePlacement(rawValue:placementRaw) ?? .right }
     private var receiverConnected: Bool { session.selected.map { session.receivers.contains($0) } == true }
 
-    init(session: MouseSession) {
+    init(session: MouseSession, openPanel: @escaping () -> Void) {
+        self.openPanel = openPanel
         self.session = session
         _edge = StateObject(wrappedValue: EdgeSwitchController(session:session))
     }
@@ -62,8 +64,8 @@ struct MouseLinkView: View {
             .navigationTitle("MouseLink").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement:.topBarLeading) {
-                    Label("Bluetoothで直接接続",systemImage:"point.3.connected.trianglepath.dotted")
-                        .font(.caption).foregroundStyle(.secondary).labelStyle(.titleAndIcon)
+                    Button { edge.disarm(); openPanel() } label: { Label("小窓パネル",systemImage:"rectangle.split.2x1") }
+                        .font(.caption).accessibilityIdentifier("open-panel")
                 }
                 ToolbarItem(placement:.topBarTrailing) {
                     Button { present(.settings) } label: { Image(systemName:"slider.horizontal.3") }
@@ -225,7 +227,7 @@ struct MouseLinkView: View {
         sheet = destination
     }
 }
-private enum WorkspaceSheet: String,Identifiable { case settings, guide, license, typing; var id:String { rawValue } }
+enum WorkspaceSheet: String,Identifiable { case settings, guide, license, typing; var id:String { rawValue } }
 
 struct WorkspaceSettings: View {
     @ObservedObject var session: MouseSession
