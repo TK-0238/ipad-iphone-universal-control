@@ -50,7 +50,7 @@ jobs:
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
           set +e
-          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MouseLinkNativeTests/TypingReentrancyRegressionTests -only-testing:MouseLinkNativeTests/TypingPresentationRegressionTests -only-testing:MouseLinkNativeTests/InputOpacityRegressionTests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/Regressions.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/regressions.log 2>&1
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MouseLinkNativeTests/TypingReentrancyRegressionTests -only-testing:MouseLinkNativeTests/TypingPresentationRegressionTests -only-testing:MouseLinkNativeTests/InputOpacityRegressionTests -only-testing:MouseLinkNativeTests/PanelStopReentrancyTests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/Regressions.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/regressions.log 2>&1
           STATUS=$?
           set -e
           tail -120 MouseLink/out/regressions.log
