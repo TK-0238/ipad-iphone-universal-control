@@ -31,9 +31,36 @@ final class PhoneLayoutUITests: XCTestCase {
         XCTAssertTrue(app.buttons["close-typing"].waitForExistence(timeout: 5))
         let field = app.descendants(matching: .any).matching(identifier: "typing-draft").firstMatch
         XCTAssertTrue(field.exists); field.tap(); field.typeText(text)
+        XCTAssertEqual(field.value as? String, text)
         XCTAssertFalse(app.buttons["send-text-enter"].isEnabled)
-        XCTAssertFalse(app.buttons["remote-enter"].isEnabled)
+        // A fresh iPhone simulator can show Apple's keyboard onboarding. Dismiss
+        // via the app's own keyboard accessory; do not tap unrelated system alerts.
+        let keyboardClose = app.buttons["キーボードを閉じる"]
+        XCTAssertTrue(keyboardClose.waitForExistence(timeout: 5))
+        keyboardClose.tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate { _,_ in
+            !app.keyboards.firstMatch.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 8), .completed)
         capture("phone-typing-\(text)")
+        // LazyVGrid has no accessibility nodes for off-screen keys in a short
+        // landscape viewport. Scroll the actual typing sheet, not its background pad.
+        let scroll = app.scrollViews.containing(.any, identifier: "typing-draft").firstMatch
+        XCTAssertTrue(scroll.exists)
+        let enter = app.buttons["remote-enter"]
+        let screen = app.windows.firstMatch.frame
+        let headerBottom = app.navigationBars["文字入力・Enter"].frame.maxY
+        for _ in 0..<6 {
+            if enter.exists, enter.frame.minY >= headerBottom, enter.frame.maxY <= screen.maxY - 20 { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(enter.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(enter.frame.minY, headerBottom)
+        XCTAssertLessThanOrEqual(enter.frame.maxY, screen.maxY - 20)
+        XCTAssertGreaterThanOrEqual(enter.frame.minX, screen.minX)
+        XCTAssertLessThanOrEqual(enter.frame.maxX, screen.maxX)
+        XCTAssertFalse(enter.isEnabled)
+        capture("phone-enter-controls-\(text)")
         app.buttons["close-typing"].tap()
         XCTAssertTrue(app.buttons["panel-stop"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["panel-enable"].isEnabled)
