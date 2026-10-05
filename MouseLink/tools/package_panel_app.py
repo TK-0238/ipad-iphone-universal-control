@@ -30,6 +30,8 @@ def main():
     s=s.replace('MARKETING_VERSION: 0.3.1','MARKETING_VERSION: 0.4.2').replace('CURRENT_PROJECT_VERSION: 5','CURRENT_PROJECT_VERSION: 8')
     p.write_text(s)
     (app/'小窓パネルの使い方.md').write_bytes((ROOT/'docs/companion-panel.md').read_bytes())
+    # README links to this canonical relative path; retain the Japanese alias too.
+    (app/'docs/companion-panel.md').write_bytes((ROOT/'docs/companion-panel.md').read_bytes())
     print('Windowed companion package:',archive(app))
 
 if __name__=='__main__': main()

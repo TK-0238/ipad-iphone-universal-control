@@ -84,10 +84,32 @@ final class PhoneLayoutUITests: XCTestCase {
         let enter = app.buttons["remote-enter"]
         let screen = app.windows.firstMatch.frame
         let headerBottom = app.navigationBars["文字入力・Enter"].frame.maxY
-        for _ in 0..<6 {
-            if enter.exists, enter.frame.minY >= headerBottom, enter.frame.maxY <= screen.maxY - 20 { break }
-            scroll.swipeUp()
+        // A full swipe can jump past the first row in a 393pt-tall landscape
+        // viewport. Use bounded real drags, reverse direction after overshoot,
+        // and hold before lifting so momentum does not hide the target again.
+        let viewport = scroll.frame.intersection(screen)
+        let top = max(viewport.minY, headerBottom) + 12
+        let bottom = viewport.maxY - 28
+        XCTAssertGreaterThan(bottom - top, 120)
+        let origin = scroll.coordinate(withNormalizedOffset: .zero)
+        let finger = origin.withOffset(CGVector(dx: viewport.midX - scroll.frame.minX,
+                                               dy: (top + bottom)/2 - scroll.frame.minY))
+        var positions = "viewport=\(viewport) top=\(top) bottom=\(bottom)\n"
+        for step in 0..<14 {
+            let frame = enter.exists ? enter.frame : CGRect.null
+            positions += "step \(step): \(frame)\n"
+            if !frame.isNull, frame.minY >= top, frame.maxY <= bottom { break }
+            let delta: CGFloat
+            if !frame.isNull, frame.minY < top {
+                delta = min(80, top - frame.minY + 12)
+            } else {
+                delta = -80
+            }
+            finger.press(forDuration: 0.05, thenDragTo: finger.withOffset(CGVector(dx: 0, dy: delta)),
+                         withVelocity: .slow, thenHoldForDuration: 0.2)
         }
+        let trace = XCTAttachment(string: positions)
+        trace.name = "phone-enter-scroll-positions"; trace.lifetime = .keepAlways; add(trace)
         XCTAssertTrue(enter.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(enter.frame.minY, headerBottom)
         XCTAssertLessThanOrEqual(enter.frame.maxY, screen.maxY - 20)

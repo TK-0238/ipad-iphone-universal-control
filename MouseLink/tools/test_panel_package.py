@@ -1,6 +1,6 @@
 """Checks generated metadata as well as the local-only panel input path; not radio tests."""
 from pathlib import Path
-import plistlib,unittest
+import plistlib,re,unittest
 ROOT=Path(__file__).resolve().parents[1]
 APP=ROOT/'out/MouseLink.swiftpm'
 class PanelPackageTests(unittest.TestCase):
@@ -26,6 +26,16 @@ class PanelPackageTests(unittest.TestCase):
         for key in ['panel-stop','panel-typing','panel-connection','panel-enable','g.size.width < 700']:
             self.assertIn(key,text)
         self.assertIn('session.bluetooth.mouseReceivers.contains',text)
+    def test_readme_local_guide_links_resolve_inside_distribution(self):
+        readme = (APP/'README.md').read_text()
+        links = re.findall(r'\[[^\]]+\]\(([^)]+)\)', readme)
+        local_links = [link.split('#',1)[0] for link in links if '://' not in link and not link.startswith('#')]
+        self.assertTrue(local_links, "The getting-started guide must be linked")
+        for relative in local_links:
+            target = APP/relative
+            self.assertTrue(target.is_file(), f"Missing bundled guide: {relative}")
+        self.assertEqual((APP/'docs/companion-panel.md').read_bytes(),
+                         (ROOT/'docs/companion-panel.md').read_bytes())
     def test_multitasking_changes_do_not_add_background_permissions(self):
         text=(APP/'PanelInfo.plist').read_text()+(APP/'Package.swift').read_text()
         self.assertNotIn('UIBackgroundModes',text)
