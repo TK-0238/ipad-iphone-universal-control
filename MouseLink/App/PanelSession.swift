@@ -19,7 +19,10 @@ extension HIDPeripheral: PanelMouseSending {
 /// A local, visible control surface. No GCMouse handlers and no pointer lock are installed here.
 @MainActor
 final class PanelSession: ObservableObject {
-    let objectWillChange = ObservableObjectPublisher()
+    // Give Combine storage for its synthesized, nonisolated objectWillChange witness.
+    // Actual state is synchronous below; sends are explicit so lifecycle redraws can
+    // be deferred without mutating a property wrapper during reentrant callbacks.
+    @Published private var presentationPublisherStorage: UInt8 = 0
     private(set) var isEnabled = false { willSet { if newValue != isEnabled { notifyPresentation() } } }
     private(set) var isInside = false { willSet { if newValue != isInside { notifyPresentation() } } }
     private(set) var status = "他のアプリの隣に置き、パッドを有効にしてください。" {

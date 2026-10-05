@@ -149,6 +149,8 @@ final class PanelSurfaceOwnershipTests: XCTestCase {
     }
     func testDeferredRedrawArrivesWithoutRestoringRevokedInput() async throws {
         let (panel, sender, _, pad) = try fixture()
+        let publisher = panel.objectWillChange
+        XCTAssertTrue(publisher === panel.objectWillChange, "One stable synthesized publisher per model")
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             DispatchQueue.main.async { done.resume() }
         }
@@ -164,6 +166,7 @@ final class PanelSurfaceOwnershipTests: XCTestCase {
             DispatchQueue.main.async { done.resume() }
         }
         XCTAssertEqual(changes, 1, "UI redraw is deferred, not suppressed")
+        XCTAssertTrue(publisher === panel.objectWillChange)
         XCTAssertFalse(panel.isEnabled)
         XCTAssertFalse(panel.surfaceIsUsable())
         panel.pump()

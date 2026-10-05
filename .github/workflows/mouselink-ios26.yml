@@ -63,12 +63,12 @@ jobs:
           tail -80 MouseLink/out/ios26/ui.log
           xcrun xcresulttool export attachments --path MouseLink/out/ios26/UI.xcresult --output-path MouseLink/out/ios26/screenshots || true
           exit "$STATUS"
-      - name: Reject view-update warnings
+      - name: Reject view-update and panel isolation warnings
         run: |
           set -euo pipefail
-          for log in native ui; do
+          for log in native ui device-build; do
             test -s "MouseLink/out/ios26/$log.log"
-            if grep -nE 'Publishing changes from within view updates|Modifying state during view update' "MouseLink/out/ios26/$log.log"; then exit 1; fi
+            if grep -nE 'Publishing changes from within view updates|Modifying state during view update|conformance of .PanelSession. to protocol .ObservableObject. crosses into main actor-isolated' "MouseLink/out/ios26/$log.log"; then exit 1; fi
           done
       - name: Upload compatibility evidence
         if: always()
