@@ -112,7 +112,12 @@ final class PanelSession: ObservableObject {
             guard now.isFinite, now >= item.queuedAt, now-item.queuedAt <= 0.5 else {
                 disable(reason:"送信が遅れたため停止しました。iPhoneの表示を確認してください。"); return
             }
-            switch sender.sendPanelMouse(item.frame,to:item.peer) {
+            let generation = buffer.generation
+            let result = sender.sendPanelMouse(item.frame,to:item.peer)
+            // A synchronous callback can leave/re-enter or disable/re-enable the pad.
+            // Never consume a new visit's baseline or apply an old failure to its queue.
+            guard generation == buffer.generation, authorized() else { return }
+            switch result {
             case .accepted: buffer.acceptNext()
             case .busy: return
             case .unavailable: disable(reason:"受信先に送信できないため停止しました。"); return

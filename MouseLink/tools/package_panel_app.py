@@ -13,7 +13,7 @@ def main():
     p=app/'Package.swift';s=p.read_text()
     old='displayVersion: "0.3.1", bundleVersion: "5"'
     if s.count(old)!=1: raise ValueError('Unexpected base package version')
-    s=s.replace(old,'displayVersion: "0.4.1", bundleVersion: "7"')
+    s=s.replace(old,'displayVersion: "0.4.2", bundleVersion: "8"')
     s=s.replace('supportedInterfaceOrientations: [.portrait, .landscapeLeft, .landscapeRight]',
         'supportedInterfaceOrientations: [.portrait, .landscapeLeft, .landscapeRight, .portraitUpsideDown(.when(deviceFamilies: [.pad]))]')
     old='capabilities: [.bluetoothAlways(purposeString: "iPhoneへマウス操作を直接転送するためBluetoothを使用します。")]'
@@ -27,7 +27,7 @@ def main():
     if '        UIRequiresFullScreen: true\n' not in s: raise ValueError('Full-screen opt-out anchor changed')
     s=s.replace('        UIRequiresFullScreen: true\n','        UIApplicationSceneManifest:\n          UIApplicationSupportsMultipleScenes: false\n')
     s=s.replace('        UILaunchScreen: {}','        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]\n        UILaunchScreen: {}')
-    s=s.replace('MARKETING_VERSION: 0.3.1','MARKETING_VERSION: 0.4.1').replace('CURRENT_PROJECT_VERSION: 5','CURRENT_PROJECT_VERSION: 7')
+    s=s.replace('MARKETING_VERSION: 0.3.1','MARKETING_VERSION: 0.4.2').replace('CURRENT_PROJECT_VERSION: 5','CURRENT_PROJECT_VERSION: 8')
     p.write_text(s)
     (app/'小窓パネルの使い方.md').write_bytes((ROOT/'docs/companion-panel.md').read_bytes())
     print('Windowed companion package:',archive(app))

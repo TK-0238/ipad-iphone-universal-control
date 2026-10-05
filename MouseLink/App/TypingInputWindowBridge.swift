@@ -11,12 +11,30 @@ enum InputWindowState {
               scene.traitCollection.activeAppearance != .inactive else { return false }
         // Read the scene and ancestors too: a descendant can have cached or overridden traits.
         // Some systems report .unspecified; the actual scene/key-window checks still apply.
+        // Being attached with isHidden == false does not imply that any pixels are visible.
+        // Carry the visible rectangle through each ancestor's coordinate system, including
+        // UIScrollView's nonzero bounds origin. Only clipping ancestors restrict overflow.
+        var visible = view.bounds
+        guard hasArea(visible) else { return false }
         var current: UIView? = view
         while let item=current {
-            if item.isHidden || item.alpha <= 0.01 || item.traitCollection.activeAppearance == .inactive { return false }
-            current=item.superview
+            if item.isHidden || !item.alpha.isFinite || item.alpha <= 0.01 ||
+                item.traitCollection.activeAppearance == .inactive { return false }
+            if item.clipsToBounds || item === window {
+                visible = visible.intersection(item.bounds)
+                guard hasArea(visible) else { return false }
+            }
+            if item === window { return true }
+            guard let parent = item.superview else { return false }
+            visible = item.convert(visible, to: parent)
+            guard hasArea(visible) else { return false }
+            current=parent
         }
-        return true
+        return false
+    }
+    private static func hasArea(_ rect: CGRect) -> Bool {
+        [rect.origin.x, rect.origin.y, rect.width, rect.height].allSatisfy(\.isFinite) &&
+            rect.width > 0 && rect.height > 0
     }
 }
 

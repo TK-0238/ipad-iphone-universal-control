@@ -62,6 +62,7 @@ public struct RelayBuffer: Sendable {
     public private(set) var peer: UUID?
     public private(set) var generation: UInt64 = 0
     private var pending: [PendingMouseFrame] = []
+    private var lastEventTime: TimeInterval?
     private let capacity: Int
     public init(capacity: Int = 128) { self.capacity = max(2, min(1024, capacity)) }
     public var next: PendingMouseFrame? { pending.first }
@@ -69,13 +70,17 @@ public struct RelayBuffer: Sendable {
     public mutating func begin(peer: UUID, at time: TimeInterval) {
         guard time.isFinite, time >= 0 else { return }
         disconnect()
-        self.peer = peer; isActive = true
+        self.peer = peer; isActive = true; lastEventTime = time
         pending = [PendingMouseFrame(peer: peer, generation: generation, frame: .zero, queuedAt: time)]
     }
     public mutating func enqueue(_ frames: [MouseFrame], at time: TimeInterval) throws {
         guard isActive, let peer else { throw RelayFailure.inactive }
-        guard time.isFinite else { pause(at: 0); throw RelayFailure.invalidMotion }
+        guard time.isFinite, time >= 0, lastEventTime.map({ time >= $0 }) ?? false else {
+            pause(at: lastEventTime ?? 0)
+            throw RelayFailure.invalidMotion
+        }
         guard frames.count <= capacity - pending.count else { pause(at: time); throw RelayFailure.congested }
+        lastEventTime = time
         pending += frames.map { PendingMouseFrame(peer: peer, generation: generation, frame: $0, queuedAt: time) }
     }
     public mutating func acceptNext() { if !pending.isEmpty { pending.removeFirst() } }
@@ -86,12 +91,16 @@ public struct RelayBuffer: Sendable {
         if let peer { pending.append(PendingMouseFrame(peer: peer, generation: generation, frame: .zero, queuedAt: time.isFinite ? time : 0)) }
     }
     @discardableResult public mutating func expire(at time: TimeInterval) -> Bool {
-        guard isActive, let first = pending.first else { return false }
-        guard time.isFinite, time >= first.queuedAt, time - first.queuedAt <= 0.5 else { pause(at: time); return true }
+        guard isActive else { return false }
+        guard time.isFinite, time >= 0, lastEventTime.map({ time >= $0 }) ?? false else {
+            pause(at: lastEventTime ?? 0); return true
+        }
+        guard let first = pending.first else { return false }
+        guard time - first.queuedAt <= 0.5 else { pause(at: time); return true }
         return false
     }
     public mutating func disconnect() {
-        isActive = false; generation &+= 1; peer = nil; pending.removeAll(keepingCapacity: true)
+        isActive = false; generation &+= 1; peer = nil; lastEventTime = nil; pending.removeAll(keepingCapacity: true)
     }
 }
 

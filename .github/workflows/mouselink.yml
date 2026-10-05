@@ -8,7 +8,7 @@ permissions:
 jobs:
   verify:
     runs-on: macos-15
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - name: Original suite
@@ -54,7 +54,7 @@ jobs:
           sleep 3
           xcrun simctl io "$DEVICE" screenshot MouseLink/out/mouselink-ipad.png
           set +e
-          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -skip-testing:MouseLinkUITests/SplitWindowUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/UITests.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/ui-test.log 2>&1
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -skip-testing:MouseLinkUITests/SplitWindowUITests -skip-testing:MouseLinkUITests/PhoneLayoutUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/UITests.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/ui-test.log 2>&1
           TEST_STATUS=$?
           set -e
           tail -85 MouseLink/out/ui-test.log
@@ -78,6 +78,22 @@ jobs:
           if [ "$TEST_STATUS" -eq 0 ]; then TEST_STATUS=$SPLIT_STATUS; fi
           xcrun simctl shutdown "$DEVICE"
           exit "$TEST_STATUS"
+      - name: iPhone-sized app UI portrait landscape and large text
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          PHONE=$(python3 -c 'import json; d=json.load(open("MouseLink/out/devices.json")); print(next(x["udid"] for ds in d["devices"].values() for x in ds if x["name"] == "iPhone 16" and x.get("isAvailable",False)))')
+          echo "$PHONE" > MouseLink/out/phone-device-id.txt
+          xcrun simctl boot "$PHONE" || true
+          xcrun simctl bootstatus "$PHONE" -b
+          set +e
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$PHONE" -only-testing:MouseLinkUITests/PhoneLayoutUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/PhoneUI.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/phone-ui.log 2>&1
+          PHONE_STATUS=$?
+          set -e
+          tail -45 MouseLink/out/phone-ui.log
+          xcrun xcresulttool export attachments --path MouseLink/out/PhoneUI.xcresult --output-path MouseLink/out/phone-screenshots || true
+          xcrun simctl shutdown "$PHONE"
+          exit "$PHONE_STATUS"
       - name: Upload source and evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -94,3 +110,5 @@ jobs:
             MouseLink/out/UITests.xcresult
             MouseLink/out/split-screenshots
             MouseLink/out/SplitView.xcresult
+            MouseLink/out/phone-screenshots
+            MouseLink/out/PhoneUI.xcresult
