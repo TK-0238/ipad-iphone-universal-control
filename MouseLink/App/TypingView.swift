@@ -102,6 +102,7 @@ struct TypingView: View {
                 ToolbarItemGroup(placement:.keyboard) { Spacer();Button("キーボードを閉じる") { draftFocused=false } }
             }
         }
+        .background(TypingInputWindowBridge(session: session).allowsHitTesting(false))
     }
     private func key(_ title:String,_ stroke:KeyboardStroke,_ identifier:String) -> some View {
         Button { draftFocused=false;session.sendKey(stroke) } label: { Text(title).frame(maxWidth:.infinity,minHeight:36) }

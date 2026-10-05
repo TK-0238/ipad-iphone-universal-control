@@ -27,7 +27,7 @@ final class TypingLifecycleTests: XCTestCase {
         let sender = LifecycleSender(), peer = UUID()
         sender.keyboardReceivers = [peer]
         let session = TypingSession(sender: sender, clock: { self.time },
-            ticks: Empty<Date, Never>().eraseToAnyPublisher())
+            ticks: Empty<Date, Never>().eraseToAnyPublisher(), inputSurfaceCheck: { true })
         session.open(peer: peer)
         return (session, sender, peer)
     }

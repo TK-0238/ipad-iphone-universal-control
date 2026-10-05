@@ -33,11 +33,14 @@ final class TypingSession: ObservableObject {
     private var operation: UInt64 = 0
     private var foreground = true
     private var opened = false
+    private var inputSurfaceCheck: () -> Bool
+    private var inputSurfaceOwner: UUID?
 
     init(sender: KeyboardSending,
          clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-         ticks: AnyPublisher<Date,Never> = Timer.publish(every:0.02,on:.main,in:.common).autoconnect().eraseToAnyPublisher()) {
-        self.sender=sender;self.clock=clock
+         ticks: AnyPublisher<Date,Never> = Timer.publish(every:0.02,on:.main,in:.common).autoconnect().eraseToAnyPublisher(),
+         inputSurfaceCheck: @escaping () -> Bool = { false }) {
+        self.sender=sender;self.clock=clock;self.inputSurfaceCheck=inputSurfaceCheck
         timer=ticks.sink { [weak self] _ in self?.pump() }
         // UIKit delivers these notifications on the main thread. Cancel synchronously:
         // receive(on:) / Task would leave a gap before SwiftUI's scenePhase catches up.
@@ -50,7 +53,25 @@ final class TypingSession: ObservableObject {
                 .store(in: &lifecycleSubscriptions)
         }
     }
-    var canSend: Bool { opened && available && !isSending && foreground }
+    var canSend: Bool { opened && available && !isSending && foreground && inputSurfaceCheck() }
+
+    /// The visible typing view owns this authorization; construction alone never grants it.
+    func bindInputSurface(owner: UUID, check: @escaping () -> Bool) {
+        if inputSurfaceOwner != owner { cancel() }
+        inputSurfaceOwner=owner;inputSurfaceCheck=check
+        inputSurfaceChanged()
+    }
+    func unbindInputSurface(owner: UUID) {
+        guard inputSurfaceOwner == owner else { return }
+        inputSurfaceOwner=nil;inputSurfaceCheck={ false }
+        inputSurfaceChanged()
+    }
+    func inputSurfaceChanged() {
+        if !inputSurfaceCheck() {
+            cancel(reason:"文字入力ウインドウの操作が解除されたため停止しました。自動再送はしません。")
+        }
+        refreshAvailability()
+    }
     var validation: String? {
         guard !draft.isEmpty else { return nil }
         do { _ = try KeyboardPlan.text(draft,mode:mode,enter:false); return nil }
@@ -135,7 +156,7 @@ final class TypingSession: ObservableObject {
         }
     }
     private func refreshAvailability() {
-        let value=opened && KeyboardPolicy.canSend(peer:peer,receivers:sender.keyboardReceivers,foreground:foreground,mouseRelaying:false)
+        let value=opened && inputSurfaceCheck() && KeyboardPolicy.canSend(peer:peer,receivers:sender.keyboardReceivers,foreground:foreground,mouseRelaying:false)
         if value != available { available=value }
     }
 }

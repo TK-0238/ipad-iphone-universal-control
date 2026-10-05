@@ -49,24 +49,23 @@ final class LocalPadView: UIView {
         for name in [UIWindow.didResignKeyNotification,UIScene.willDeactivateNotification] {
             observers.append(NotificationCenter.default.addObserver(forName:name,object:nil,queue:.main) { [weak self] note in
                 MainActor.assumeIsolated {
-                    guard let self else { return }
-                    if (note.object as? UIWindow) === self.window || (note.object as? UIScene) === self.window?.windowScene {
+                    guard let self, let own = self.window else { return }
+                    if (note.object as? UIWindow) === own || (note.object as? UIScene) === own.windowScene {
                         self.panel?.disable(reason:"操作ウインドウが非アクティブになったため停止しました。")
                         self.cancelled=true
                     }
                 }
             })
         }
+        registerForTraitChanges([UITraitActiveAppearance.self]) { (view: LocalPadView, _: UITraitCollection) in
+            if !view.usable { view.panel?.disable();view.cancelled=true }
+        }
         refreshLabel()
     }
     @available(*,unavailable) required init?(coder:NSCoder) { fatalError("No storyboard") }
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
     var usable:Bool {
-        guard let window,window.isKeyWindow,window.windowScene?.activationState == .foregroundActive,
-              !isHidden,alpha > 0.01,bounds.width > 0,bounds.height > 0 else { return false }
-        var parent=superview
-        while let p=parent { if p.isHidden || p.alpha <= 0.01 { return false }; parent=p.superview }
-        return true
+        InputWindowState.allowsInput(in:self) && bounds.width > 0 && bounds.height > 0
     }
     override func didMoveToWindow() {
         super.didMoveToWindow()

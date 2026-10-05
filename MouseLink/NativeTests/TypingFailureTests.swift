@@ -21,7 +21,7 @@ final class TypingFailureTests: XCTestCase {
     private var now: TimeInterval = 1
     private func model() -> (TypingSession, FaultSender, UUID) {
         let sender = FaultSender(); let peer = UUID(); sender.keyboardReceivers = [peer]
-        let session = TypingSession(sender: sender, clock: { self.now }, ticks: Empty<Date, Never>().eraseToAnyPublisher())
+        let session = TypingSession(sender: sender, clock: { self.now }, ticks: Empty<Date, Never>().eraseToAnyPublisher(), inputSurfaceCheck: { true })
         session.open(peer: peer)
         return (session, sender, peer)
     }

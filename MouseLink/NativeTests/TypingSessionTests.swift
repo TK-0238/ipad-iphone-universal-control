@@ -21,7 +21,7 @@ final class TypingSessionTests: XCTestCase {
     private var time:TimeInterval=1
     private func setup() -> (TypingSession,CaptureSender,UUID) {
         let sender=CaptureSender();let peer=UUID();sender.keyboardReceivers=[peer]
-        let model=TypingSession(sender:sender,clock:{ self.time },ticks:Empty<Date,Never>().eraseToAnyPublisher())
+        let model=TypingSession(sender:sender,clock:{ self.time },ticks:Empty<Date,Never>().eraseToAnyPublisher(), inputSurfaceCheck: { true })
         model.open(peer:peer);return (model,sender,peer)
     }
     private func finish(_ model:TypingSession) {

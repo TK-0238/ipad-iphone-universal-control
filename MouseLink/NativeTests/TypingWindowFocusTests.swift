@@ -84,4 +84,38 @@ final class TypingWindowFocusTests: XCTestCase {
         XCTAssertEqual(sender.reports.count, count)
         XCTAssertFalse(sender.reports.contains(KeyboardStroke.enter.data))
     }
+    func testUnboundTypingCannotSendEvenWithConnectedReceiver() {
+        let sender=FocusCaptureSender(), peer=UUID(); sender.keyboardReceivers=[peer]
+        let typing=TypingSession(sender:sender,clock:{ self.time },ticks:Empty<Date,Never>().eraseToAnyPublisher())
+        typing.open(peer:peer);typing.sendKey(.enter)
+        XCTAssertFalse(typing.canSend);XCTAssertTrue(sender.reports.isEmpty)
+    }
+    func testHidingWindowIsCheckedBeforeNextReport() throws {
+        let (typing,sender,win)=try make()
+        win.isHidden=true
+        time += 0.021;typing.pump()
+        XCTAssertFalse(typing.isSending)
+        XCTAssertEqual(sender.reports.last,KeyboardStroke.zero.data)
+        XCTAssertFalse(sender.reports.contains(KeyboardStroke.enter.data))
+    }
+    func testInactiveAppearanceIsNotPermissionToKeepTyping() throws {
+        let (typing,sender,win)=try make()
+        win.traitOverrides.activeAppearance = .inactive
+        win.rootViewController?.view.layoutIfNeeded()
+        time += 0.021;typing.pump()
+        XCTAssertFalse(typing.isSending)
+        XCTAssertEqual(sender.reports.last,KeyboardStroke.zero.data)
+        XCTAssertFalse(sender.reports.contains(KeyboardStroke.enter.data))
+    }
+    func testStaleSurfaceDetachCannotRevokeNewSurface() {
+        let sender=FocusCaptureSender(),peer=UUID();sender.keyboardReceivers=[peer]
+        let typing=TypingSession(sender:sender,clock:{self.time},ticks:Empty<Date,Never>().eraseToAnyPublisher())
+        let old=UUID(),new=UUID()
+        typing.bindInputSurface(owner:old,check:{true})
+        typing.bindInputSurface(owner:new,check:{true})
+        typing.unbindInputSurface(owner:old)
+        typing.open(peer:peer);typing.sendKey(.enter)
+        for _ in 0..<5 {time += 0.021;typing.pump()}
+        XCTAssertEqual(sender.reports.filter{$0==KeyboardStroke.enter.data}.count,1)
+    }
 }
