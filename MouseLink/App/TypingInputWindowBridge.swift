@@ -7,12 +7,13 @@ import UIKit
 enum InputWindowState {
     static func allowsInput(in view: UIView) -> Bool {
         guard let window=view.window, !window.isHidden, window.isKeyWindow,
-              window.windowScene?.activationState == .foregroundActive,
-              view.traitCollection.activeAppearance != .inactive else { return false }
-        // Some older systems report .unspecified; the actual scene/key-window checks still apply.
+              let scene = window.windowScene, scene.activationState == .foregroundActive,
+              scene.traitCollection.activeAppearance != .inactive else { return false }
+        // Read the scene and ancestors too: a descendant can have cached or overridden traits.
+        // Some systems report .unspecified; the actual scene/key-window checks still apply.
         var current: UIView? = view
         while let item=current {
-            if item.isHidden || item.alpha <= 0.01 { return false }
+            if item.isHidden || item.alpha <= 0.01 || item.traitCollection.activeAppearance == .inactive { return false }
             current=item.superview
         }
         return true

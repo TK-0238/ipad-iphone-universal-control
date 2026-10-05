@@ -101,7 +101,12 @@ final class TypingWindowFocusTests: XCTestCase {
     func testInactiveAppearanceIsNotPermissionToKeepTyping() throws {
         let (typing,sender,win)=try make()
         win.traitOverrides.activeAppearance = .inactive
-        win.rootViewController?.view.layoutIfNeeded()
+        // A layout pass is not a trait update. Apply the injected UIKit trait, then prove
+        // the fixture is actually inactive before testing the production write gate.
+        win.updateTraitsIfNeeded()
+        XCTAssertEqual(win.traitCollection.activeAppearance, .inactive)
+        let state = XCTAttachment(string: "window=\(win.traitCollection.activeAppearance.rawValue) scene=\(String(describing: win.windowScene?.traitCollection.activeAppearance.rawValue))")
+        state.name="typing-inactive-window-traits";state.lifetime = .keepAlways;add(state)
         time += 0.021;typing.pump()
         XCTAssertFalse(typing.isSending)
         XCTAssertEqual(sender.reports.last,KeyboardStroke.zero.data)
