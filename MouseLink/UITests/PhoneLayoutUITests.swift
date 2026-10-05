@@ -26,15 +26,45 @@ final class PhoneLayoutUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
+    private func finishKeyboardOnboardingIfPresent(_ app: XCUIApplication) {
+        // Only the known first-use keyboard tutorial, identified in the failure's
+        // accessibility tree. This is a disposable simulator, not a user device.
+        let intro = app.otherElements["UIContinuousPathIntroductionView"]
+        guard intro.waitForExistence(timeout: 2) else { return }
+        capture("phone-keyboard-first-use")
+        let orientation = XCUIDevice.shared.orientation
+        // The first-use keyboard window reported portrait coordinates while the app
+        // was landscape. Finish setup in portrait, then restore the tested orientation.
+        if orientation.isLandscape { XCUIDevice.shared.orientation = .portrait }
+        let next = intro.buttons.matching(NSPredicate(format:
+            "label == 'Continue' OR label == '続ける' OR label == '続行'")).firstMatch
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _,_ in
+            app.windows.firstMatch.frame.width < app.windows.firstMatch.frame.height && next.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 8), .completed)
+        next.tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _,_ in !intro.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
+        if orientation.isLandscape {
+            XCUIDevice.shared.orientation = orientation
+            let restored = XCTNSPredicateExpectation(predicate: NSPredicate { _,_ in
+                app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 8), .completed)
+        }
+        capture("phone-keyboard-ready")
+    }
     private func checkTyping(_ app: XCUIApplication, text: String) {
         app.buttons["panel-typing"].tap()
         XCTAssertTrue(app.buttons["close-typing"].waitForExistence(timeout: 5))
         let field = app.descendants(matching: .any).matching(identifier: "typing-draft").firstMatch
-        XCTAssertTrue(field.exists); field.tap(); field.typeText(text)
+        XCTAssertTrue(field.exists); field.tap()
+        finishKeyboardOnboardingIfPresent(app)
+        field.tap(); field.typeText(text)
         XCTAssertEqual(field.value as? String, text)
         XCTAssertFalse(app.buttons["send-text-enter"].isEnabled)
-        // A fresh iPhone simulator can show Apple's keyboard onboarding. Dismiss
-        // via the app's own keyboard accessory; do not tap unrelated system alerts.
+        // With keyboard setup completed, use the app's own accessory to dismiss.
+        // No return/submit key is synthesized and no remote input is authorized.
         let keyboardClose = app.buttons["キーボードを閉じる"]
         XCTAssertTrue(keyboardClose.waitForExistence(timeout: 5))
         keyboardClose.tap()
