@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Foundation
 import Combine
+import UIKit
 
 // Kept injectable so native tests exercise the same UI-to-report path without a Bluetooth radio.
 enum KeyboardSendResult { case accepted, busy, unavailable }
@@ -25,6 +26,7 @@ final class TypingSession: ObservableObject {
     private let sender: KeyboardSending
     private let clock: () -> TimeInterval
     private var timer: AnyCancellable?
+    private var lifecycleSubscriptions = Set<AnyCancellable>()
     private var transaction = KeyboardTransaction()
     private var transactionEpoch: UInt64?
     private var pumping = false
@@ -37,6 +39,16 @@ final class TypingSession: ObservableObject {
          ticks: AnyPublisher<Date,Never> = Timer.publish(every:0.02,on:.main,in:.common).autoconnect().eraseToAnyPublisher()) {
         self.sender=sender;self.clock=clock
         timer=ticks.sink { [weak self] _ in self?.pump() }
+        // UIKit delivers these notifications on the main thread. Cancel synchronously:
+        // receive(on:) / Task would leave a gap before SwiftUI's scenePhase catches up.
+        for name in [UIApplication.willResignActiveNotification,
+                     UIApplication.didEnterBackgroundNotification] {
+            NotificationCenter.default.publisher(for: name, object: UIApplication.shared)
+                .sink { [weak self] _ in
+                    MainActor.assumeIsolated { self?.setForeground(false) }
+                }
+                .store(in: &lifecycleSubscriptions)
+        }
     }
     var canSend: Bool { opened && available && !isSending && foreground }
     var validation: String? {
