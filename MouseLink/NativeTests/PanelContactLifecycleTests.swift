@@ -27,9 +27,10 @@ private final class ContactSender: PanelMouseSending {
 @MainActor
 final class PanelContactLifecycleTests: XCTestCase {
     private var window: UIWindow?
+    private var retainedPanel: PanelSession?
     private weak var originalWindow: UIWindow?
     override func tearDown() {
-        window?.isHidden = true; window = nil
+        window?.isHidden = true; window = nil; retainedPanel = nil
         originalWindow?.makeKeyAndVisible(); super.tearDown()
     }
     private func fixture(enabled: Bool = true) throws -> (PanelSession, ContactSender, LocalPadView) {
@@ -37,6 +38,7 @@ final class PanelContactLifecycleTests: XCTestCase {
         originalWindow = scene.windows.first { $0.isKeyWindow }
         let sender = ContactSender()
         let panel = PanelSession(sender: sender, clock: { 1 }, ticks: Empty<Date, Never>().eraseToAnyPublisher())
+        retainedPanel = panel // LocalPadView intentionally holds only a weak model reference.
         let win = UIWindow(windowScene: scene), controller = UIViewController()
         win.rootViewController = controller; window = win; win.makeKeyAndVisible()
         let pad = LocalPadView(panel: panel)
