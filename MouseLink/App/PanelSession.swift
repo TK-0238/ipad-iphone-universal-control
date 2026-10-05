@@ -33,6 +33,8 @@ final class PanelSession: ObservableObject {
     private var pointer = LocalPadPointer()
     private var buffer = RelayBuffer()
     private var pumping = false
+    private var disabling = false
+    private var leaving = false
     private var subscriptions = Set<AnyCancellable>()
 
     init(sender: PanelMouseSending, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
@@ -46,6 +48,7 @@ final class PanelSession: ObservableObject {
         }
     }
     func enable(peer: UUID?) {
+        guard !disabling, !leaving else { return }
         disable()
         let now=clock()
         guard foreground, surfaceIsUsable(), let peer, sender.mouseReceivers.contains(peer),
@@ -77,18 +80,24 @@ final class PanelSession: ObservableObject {
     }
     func tap() { buttons(1); buttons(0) }
     func leave() {
+        guard !disabling, !leaving else { return }
+        leaving=true; defer { leaving=false }
         pointer.leave(); isInside=false
         // Discard queued nonzero motion immediately; do not replay it on re-entry.
         finishStroke()
     }
     func disable(reason:String? = nil) {
+        // Close the gate before @Published willSet or transport callbacks can reenter.
+        // A real window loss may still disable an in-progress leave.
+        guard !disabling else { return }
+        disabling=true; defer { disabling=false }
         isEnabled=false; pointer.leave(); isInside=false
         finishStroke(); peer=nil; epoch=nil
         if let reason { status=reason }
     }
     func geometryChanged() { disable(reason:"ウインドウの大きさが変わったため停止しました。") }
     private func authorized() -> Bool {
-        guard isEnabled else { return false }
+        guard !disabling, !leaving, isEnabled else { return false }
         guard foreground, surfaceIsUsable(), let peer, epoch == sender.inputEpoch,
               sender.mouseReceivers.contains(peer) else {
             disable(reason:"表示または接続が変わったため停止しました。古い入力は再送しません。"); return false
