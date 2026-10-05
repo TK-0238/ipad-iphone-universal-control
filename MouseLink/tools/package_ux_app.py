@@ -19,6 +19,10 @@ def main():
     text = project.read_text().replace('MARKETING_VERSION: 0.2.1', 'MARKETING_VERSION: 0.3.0')
     project.write_text(text.replace('CURRENT_PROJECT_VERSION: 3', 'CURRENT_PROJECT_VERSION: 4'))
     (app/'操作画面と画面端切替.md').write_bytes((ROOT/'docs/continuity-ux.md').read_bytes())
+    for name in ['keyboard-enter.md', 'continuity-ux.md']:
+        destination = app/'docs'/name
+        destination.parent.mkdir(parents=True,exist_ok=True)
+        destination.write_bytes((ROOT/'docs'/name).read_bytes())
     print('Continuity UX package:', archive(app))
 
 if __name__ == '__main__':

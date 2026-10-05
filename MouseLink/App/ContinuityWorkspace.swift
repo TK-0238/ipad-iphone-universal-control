@@ -82,8 +82,8 @@ struct MouseLinkView: View {
             .onChange(of:placementRaw) { _,_ in edge.setPlacement(placement) }
             .onChange(of:session.isRelaying) { _,_ in edge.disarm() }
             .onReceive(NotificationCenter.default.publisher(for:UIApplication.willResignActiveNotification)) { _ in edge.disarm() }
-            .onReceive(NotificationCenter.default.publisher(for:.GCMouseDidDisconnect)) { _ in edge.disarm() }
-            .onReceive(NotificationCenter.default.publisher(for:.GCMouseDidConnect)) { _ in edge.disarm() }
+            .onReceive(NotificationCenter.default.publisher(for:.GCMouseDidDisconnect).receive(on:DispatchQueue.main)) { _ in edge.disarm() }
+            .onReceive(NotificationCenter.default.publisher(for:.GCMouseDidConnect).receive(on:DispatchQueue.main)) { _ in edge.disarm() }
             .onDisappear { edge.disarm() }
         }
     }
@@ -159,7 +159,7 @@ struct MouseLinkView: View {
             }
             if edge.isArmed {
                 ProgressView(value:edge.progress).accessibilityLabel("端から切り替えの進行")
-                Text("画面中央から\(placement.edgeDescription)へ。移動やドラッグでは切り替わりません。")
+                Text("画面中央から\(placement.edgeDescription)へ。通り過ぎるだけ、またはドラッグ中では切り替わりません。")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("接続後に待機を許可すると1回だけ有効。ほかのアプリ上では動作しません。")
@@ -177,7 +177,7 @@ struct MouseLinkView: View {
                     .buttonStyle(.borderedProminent).accessibilityIdentifier("advertise")
                 Text(session.bluetoothStatus).font(.caption).foregroundStyle(.secondary)
             }
-        }.padding(18).background(Color(uiColor:.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:16))
+        }.frame(maxWidth:.infinity,alignment:.leading).padding(18).background(Color(uiColor:.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:16))
     }
     private func setupRow(_ number:String,title:String,detail:String,done:Bool) -> some View {
         HStack(alignment:.top,spacing:12) {

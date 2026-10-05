@@ -22,6 +22,17 @@ final class ContinuityUITests: XCTestCase {
         capture("ux-workspace-left")
         app.buttons["place-right"].tap(); capture("ux-workspace-right")
     }
+    func testDraggingPlacementDoesNotStartRemoteInput() {
+        let app = launch(); app.buttons["place-right"].tap()
+        let handle = app.descendants(matching:.any).matching(identifier:"placement-drag-handle").firstMatch
+        XCTAssertTrue(handle.isHittable)
+        let start = handle.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5))
+        start.press(forDuration:0.15,thenDragTo:start.withOffset(CGVector(dx:-160,dy:0)))
+        XCTAssertEqual(app.buttons["place-left"].value as? String,"選択中")
+        XCTAssertFalse(app.buttons["start"].isEnabled); XCTAssertFalse(app.buttons["cancel-edge"].exists)
+        capture("ux-dragged-placement")
+        app.buttons["place-right"].tap()
+    }
     func testPlacementPersistsButEdgePermissionDoesNot() {
         let app = launch(); app.buttons["place-left"].tap(); app.terminate(); app.launch()
         XCTAssertTrue(app.buttons["place-left"].waitForExistence(timeout:10))
