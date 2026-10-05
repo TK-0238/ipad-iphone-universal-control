@@ -10,7 +10,7 @@ struct MouseLinkApp: App {
     var body: some Scene {
         WindowGroup {
             MouseLinkHost(session: session)
-                .onChange(of: phase) { newValue in session.setForeground(newValue == .active) }
+                .onChange(of: phase) { _, newValue in session.setForeground(newValue == .active) }
         }
     }
 }
@@ -59,112 +59,6 @@ final class LockHostingController: UIHostingController<MouseLinkView> {
     override var prefersPointerLocked: Bool { locked }
 }
 
-struct MouseLinkView: View {
-    @ObservedObject var session: MouseSession
-    @State private var guide = false
-    @State private var license = false
-    @State private var typing = false
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    header
-                    connection
-                    controls
-                    Button { session.openTyping(); typing = true } label: {
-                        Label("文字入力・Enter", systemImage: "keyboard").frame(maxWidth: .infinity).padding(.vertical, 8)
-                    }.buttonStyle(.bordered).accessibilityIdentifier("open-typing")
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("操作の感度", systemImage: "slider.horizontal.3").font(.headline)
-                        HStack {
-                            Slider(value: $session.sensitivity, in: 0.25...3, step: 0.05)
-                                .accessibilityLabel("マウス感度")
-                            Text(session.sensitivity, format: .number.precision(.fractionLength(2))).monospacedDigit().frame(width: 56)
-                        }
-                        Toggle("スクロール方向を反転", isOn: $session.reverseScroll)
-                    }.disabled(session.isRelaying)
-                    Divider()
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("このアプリを開いている間に転送します。")
-                            .font(.headline)
-                        Text("iPhoneの画面にはAssistiveTouchのポインターが表示されます。iPadの他アプリ上での自動画面端切り替えや、iPhoneの画面ミラーリングは行いません。")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Button("接続ガイド") { guide = true }.accessibilityIdentifier("guide")
-                        Spacer()
-                        Button("ライセンス・ソース") { license = true }.accessibilityIdentifier("license")
-                    }.font(.subheadline)
-                }
-                .padding(24).frame(maxWidth: 700).frame(maxWidth: .infinity)
-            }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("MouseLink")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                if session.isRelaying { Button("停止", role: .destructive) { session.pause() }.accessibilityIdentifier("stop") }
-            } }
-            .sheet(isPresented: $guide) { GuideView() }
-            .sheet(isPresented: $license) { LicenseView() }
-            .sheet(isPresented: $typing, onDismiss: { session.typing.close() }) { TypingView(session: session.typing) }
-        }
-    }
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(session.isRelaying ? "iPhoneを操作中" : "1つのマウスで、2つの画面へ。",
-                  systemImage: session.isRelaying ? "cursorarrow.rays" : "computermouse")
-                .font(.title2.bold()).accessibilityIdentifier("headline")
-            Text("iPad  →  Bluetooth  →  iPhone")
-                .font(.subheadline.monospaced()).foregroundStyle(.secondary)
-            Text(session.message).font(.body).fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("status")
-        }
-    }
-    private var connection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label(session.mouseName ?? "マウス未接続", systemImage: session.mouseName == nil ? "computermouse" : "checkmark.circle")
-                .accessibilityIdentifier("mouse-status")
-            Divider()
-            Label(session.bluetoothStatus, systemImage: "antenna.radiowaves.left.and.right")
-            if !session.receivers.isEmpty {
-                Text("転送する受信先").font(.caption).foregroundStyle(.secondary)
-                ForEach(session.receivers, id: \.self) { peer in
-                    Button { session.select(peer) } label: {
-                        HStack {
-                            Image(systemName: session.selected == peer ? "checkmark.circle.fill" : "circle")
-                            VStack(alignment: .leading) {
-                                Text("Bluetooth受信先")
-                                Text(peer.uuidString).font(.caption.monospaced()).lineLimit(1).minimumScaleFactor(0.7)
-                            }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.disabled(session.isRelaying)
-                }
-                Text("接続名だけで相手を判別しません。初回はiPhoneだけをペアリングし、開始ボタンで転送を許可してください。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }.padding(20).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
-    }
-    private var controls: some View {
-        VStack(spacing: 12) {
-            if session.isRelaying {
-                Button { session.pause() } label: {
-                    Label("iPad操作に戻る", systemImage: "pause.fill").frame(maxWidth: .infinity).padding(.vertical, 9)
-                }.buttonStyle(.borderedProminent).tint(.orange).accessibilityIdentifier("pause")
-                Text("マウスの中央ボタンでも停止できます。中央ボタンのないマウスでは、このボタンをタップしてください。")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                Button { session.start() } label: {
-                    Label("iPhoneの操作を開始", systemImage: "play.fill").frame(maxWidth: .infinity).padding(.vertical, 9)
-                }.buttonStyle(.borderedProminent).disabled(!session.canStart).accessibilityIdentifier("start")
-                HStack {
-                    Button("接続待ちを開始") { session.advertise() }.buttonStyle(.bordered).accessibilityIdentifier("advertise")
-                    Spacer()
-                    Button("すべて切断", role: .destructive) { session.disconnect() }.buttonStyle(.bordered)
-                }
-            }
-        }
-    }
-}
-
 struct GuideView: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -177,10 +71,13 @@ struct GuideView: View {
                     Text("設定 → アクセシビリティ → タッチ → AssistiveTouchをオンにします。その画面の「デバイス」→「Bluetoothデバイス」でMouseLinkを選び、システムのペアリング要求を確認します。")
                 }
                 Section("3 · 転送を許可") {
-                    Text("iPadで受信先を選び、「iPhoneの操作を開始」を押します。移動・左クリック・右クリック・ホイールをBluetoothで直接送ります。iPhone側にこのアプリをインストールする必要はありません。")
+                    Text("iPadで受信先を選び、「iPhoneに切り替え」を押します。移動・左クリック・右クリック・ホイールをBluetoothで直接送ります。iPhone側にこのアプリをインストールする必要はありません。")
                 }
                 Section("4 · iPadに戻る") {
-                    Text("マウスの中央ボタン、またはiPad画面の「iPad操作に戻る」で停止します。他のiPadアプリへ移ると転送は停止し、戻っても自動再開しません。")
+                    Text("マウスの中央ボタン、またはiPad画面の「iPadに戻る」で停止します。他のiPadアプリへ移ると転送は停止し、戻っても自動再開しません。")
+                }
+                Section("配置と画面端の切り替え") {
+                    Text("左右のボタン、またはiPhone図の下の↔をドラッグして配置します。接続後に「待機する」を押し、画面中央から配置した側の端へポインターを移動して0.7秒止めると1回だけ切り替わります。MouseLink内だけの機能です。")
                 }
                 Section("接続できないとき") {
                     Text("Bluetoothの許可、iPhoneのAssistiveTouch、両端末の距離を確認します。古いペアリングが残っている場合は、iPhone側でMouseLinkを登録解除してからペアリングし直してください。接続名や公開実装の対応表だけでは、手元の組み合わせの動作保証にはなりません。")

@@ -24,7 +24,7 @@ jobs:
       - name: Package offline iPad source and verify safety wiring
         run: |
           set -o pipefail
-          python3 MouseLink/tools/package_keyboard_app.py
+          python3 MouseLink/tools/package_ux_app.py
           python3 MouseLink/tools/test_hardening.py -v 2>&1 | tee MouseLink/out/package-tests.log
           git archive --format=zip --output=MouseLink/out/QA-source.zip HEAD MouseLink .github/workflows/mouselink.yml
           git rev-parse HEAD > MouseLink/out/checkout-sha.txt
@@ -58,6 +58,14 @@ jobs:
           set -e
           tail -85 MouseLink/out/ui-test.log
           xcrun xcresulttool export attachments --path MouseLink/out/UITests.xcresult --output-path MouseLink/out/ui-screenshots || true
+          if [ "$TEST_STATUS" -eq 0 ]; then
+            xcrun simctl ui "$DEVICE" appearance dark
+            xcrun simctl terminate "$DEVICE" jp.kawashimataiki.mouselink || true
+            xcrun simctl launch "$DEVICE" jp.kawashimataiki.mouselink
+            sleep 3
+            xcrun simctl io "$DEVICE" screenshot MouseLink/out/ux-workspace-dark.png
+            xcrun simctl ui "$DEVICE" appearance light
+          fi
           xcrun simctl shutdown "$DEVICE"
           exit "$TEST_STATUS"
       - name: Upload source and evidence
