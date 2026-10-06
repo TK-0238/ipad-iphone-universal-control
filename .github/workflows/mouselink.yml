@@ -1,0 +1,139 @@
+name: MouseLink native verification
+on:
+  pull_request:
+    paths: ['MouseLink/**', '.github/workflows/mouselink.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Original suite
+        run: |
+          set -o pipefail
+          mkdir -p MouseLink/out
+          swift test 2>&1 | tee MouseLink/out/original-tests.log
+      - name: MouseLink debug and release suites
+        run: |
+          set -o pipefail
+          swift test --package-path MouseLink 2>&1 | tee MouseLink/out/core-debug.log
+          swift test --package-path MouseLink -c release 2>&1 | tee MouseLink/out/core-release.log
+      - name: Package offline iPad source and verify safety wiring
+        run: |
+          set -o pipefail
+          python3 MouseLink/tools/package_panel_app.py
+          python3 MouseLink/tools/test_hardening.py -v 2>&1 | tee MouseLink/out/package-tests.log
+          python3 MouseLink/tools/test_panel_package.py -v 2>&1 | tee MouseLink/out/panel-package-tests.log
+          git archive --format=zip --output=MouseLink/out/QA-source.zip HEAD MouseLink .github/workflows/mouselink.yml
+          git rev-parse HEAD > MouseLink/out/checkout-sha.txt
+      - name: Generate native project
+        run: |
+          command -v xcodegen || brew install xcodegen
+          cd MouseLink/out
+          xcodegen generate
+      - name: Build iOS Simulator debug and iOS device release
+        run: |
+          set -o pipefail
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath MouseLink/DerivedData CODE_SIGNING_ALLOWED=NO build > MouseLink/out/build.log 2>&1 || { tail -100 MouseLink/out/build.log; exit 1; }
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release -derivedDataPath MouseLink/DeviceDerivedData CODE_SIGNING_ALLOWED=NO build > MouseLink/out/device-release-build.log 2>&1 || { tail -100 MouseLink/out/device-release-build.log; exit 1; }
+          tail -6 MouseLink/out/build.log
+          tail -6 MouseLink/out/device-release-build.log
+      - name: Native safety regressions before UI
+        id: regressions
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > MouseLink/out/devices.json
+          DEVICE=$(python3 -c 'import json; d=json.load(open("MouseLink/out/devices.json")); print(next(x["udid"] for ds in d["devices"].values() for x in ds if "iPad Pro" in x["name"] and x.get("isAvailable",False)))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          set +e
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MouseLinkNativeTests/TypingReentrancyRegressionTests -only-testing:MouseLinkNativeTests/TypingPresentationRegressionTests -only-testing:MouseLinkNativeTests/InputOpacityRegressionTests -only-testing:MouseLinkNativeTests/PanelStopReentrancyTests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/Regressions.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/regressions.log 2>&1
+          STATUS=$?
+          set -e
+          tail -120 MouseLink/out/regressions.log
+          exit "$STATUS"
+      - name: Native iPad safety and UI tests with screenshots
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > MouseLink/out/devices.json
+          DEVICE=$(python3 -c 'import json; d=json.load(open("MouseLink/out/devices.json")); print(next(x["udid"] for ds in d["devices"].values() for x in ds if "iPad Pro" in x["name"] and x.get("isAvailable",False)))')
+          echo "$DEVICE" > MouseLink/out/device-id.txt
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl install "$DEVICE" MouseLink/DerivedData/Build/Products/Debug-iphonesimulator/MouseLink.app
+          xcrun simctl launch "$DEVICE" jp.kawashimataiki.mouselink
+          sleep 3
+          xcrun simctl io "$DEVICE" screenshot MouseLink/out/mouselink-ipad.png
+          set +e
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -skip-testing:MouseLinkUITests/SplitWindowUITests -skip-testing:MouseLinkUITests/PhoneLayoutUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/UITests.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/ui-test.log 2>&1
+          TEST_STATUS=$?
+          set -e
+          tail -85 MouseLink/out/ui-test.log
+          xcrun xcresulttool export attachments --path MouseLink/out/UITests.xcresult --output-path MouseLink/out/ui-screenshots || true
+          if [ "$TEST_STATUS" -eq 0 ]; then
+            xcrun simctl ui "$DEVICE" appearance dark
+            xcrun simctl terminate "$DEVICE" jp.kawashimataiki.mouselink || true
+            xcrun simctl launch "$DEVICE" jp.kawashimataiki.mouselink
+            sleep 3
+            xcrun simctl io "$DEVICE" screenshot MouseLink/out/ux-workspace-dark.png
+            xcrun simctl ui "$DEVICE" appearance light
+          fi
+          # Collect Split View even on a normal UI failure; preserve earlier failure.
+          set +e
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MouseLinkUITests/SplitWindowUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/SplitView.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/split-view.log 2>&1
+          SPLIT_STATUS=$?
+          set -e
+          tail -40 MouseLink/out/split-view.log
+          xcrun xcresulttool export attachments --path MouseLink/out/SplitView.xcresult --output-path MouseLink/out/split-screenshots || true
+          if [ "$TEST_STATUS" -eq 0 ]; then TEST_STATUS=$SPLIT_STATUS; fi
+          xcrun simctl shutdown "$DEVICE"
+          exit "$TEST_STATUS"
+      - name: iPhone-sized app UI portrait landscape and large text
+        if: ${{ !cancelled() && steps.regressions.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          PHONE=$(python3 -c 'import json; d=json.load(open("MouseLink/out/devices.json")); print(next(x["udid"] for ds in d["devices"].values() for x in ds if x["name"] == "iPhone 16" and x.get("isAvailable",False)))')
+          echo "$PHONE" > MouseLink/out/phone-device-id.txt
+          xcrun simctl boot "$PHONE" || true
+          xcrun simctl bootstatus "$PHONE" -b
+          set +e
+          xcodebuild -project MouseLink/out/MouseLink.xcodeproj -scheme MouseLink -destination "platform=iOS Simulator,id=$PHONE" -only-testing:MouseLinkUITests/PhoneLayoutUITests -parallel-testing-enabled NO -derivedDataPath MouseLink/DerivedData -resultBundlePath MouseLink/out/PhoneUI.xcresult CODE_SIGNING_ALLOWED=NO test > MouseLink/out/phone-ui.log 2>&1
+          PHONE_STATUS=$?
+          set -e
+          tail -45 MouseLink/out/phone-ui.log
+          xcrun xcresulttool export attachments --path MouseLink/out/PhoneUI.xcresult --output-path MouseLink/out/phone-screenshots || true
+          xcrun simctl shutdown "$PHONE"
+          exit "$PHONE_STATUS"
+      - name: Reject SwiftUI view-update runtime warnings
+        run: |
+          set -euo pipefail
+          for log in regressions ui-test split-view phone-ui; do
+            test -s "MouseLink/out/$log.log"
+            if grep -nE 'Publishing changes from within view updates|Modifying state during view update' "MouseLink/out/$log.log"; then
+              echo "Unexpected SwiftUI view-update warning in $log.log"
+              exit 1
+            fi
+          done
+          echo 'SwiftUI view-update warnings: 0'
+      - name: Upload source and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MouseLink-iPad-and-validation
+          retention-days: 14
+          path: |
+            MouseLink/out/MouseLink-iPad.zip
+            MouseLink/out/QA-source.zip
+            MouseLink/out/*.log
+            MouseLink/out/*.txt
+            MouseLink/out/*.png
+            MouseLink/out/ui-screenshots
+            MouseLink/out/UITests.xcresult
+            MouseLink/out/Regressions.xcresult
+            MouseLink/out/split-screenshots
+            MouseLink/out/SplitView.xcresult
+            MouseLink/out/phone-screenshots
+            MouseLink/out/PhoneUI.xcresult
