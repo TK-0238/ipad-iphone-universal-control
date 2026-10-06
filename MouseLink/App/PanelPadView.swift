@@ -18,6 +18,7 @@ final class LocalPadView: UIView {
     private var observers:[NSObjectProtocol]=[]
     private var lastSize:CGSize = .zero
     private var tracked:UITouch?
+    private var trackedGeneration:UInt64?
     private var origin:CGPoint = .zero
     private var moved = false
     private var cancelled = false
@@ -84,7 +85,7 @@ final class LocalPadView: UIView {
     }
     private func detach() {
         panel?.unbindInputSurface(owner:owner)
-        boundWindow=nil; tracked=nil; cancelled=true
+        boundWindow=nil; resetContact()
     }
     func dismantle() {
         dismantled=true
@@ -96,7 +97,7 @@ final class LocalPadView: UIView {
         super.layoutSubviews()
         if isCurrentSurface && lastSize != .zero && lastSize != bounds.size {
             panel?.invalidateInputSurface(owner:owner,reason:"ウインドウの大きさが変わったため停止しました。")
-            tracked=nil;cancelled=true
+            resetContact()
         }
         lastSize=bounds.size
         layer.borderColor=UIColor.separator.cgColor
@@ -130,31 +131,64 @@ final class LocalPadView: UIView {
         let delta=g.translation(in:self);g.setTranslation(.zero,in:self)
         panel?.scroll(-delta.y/12)
     }
+    private var hasCurrentContact: Bool {
+        guard tracked != nil, let generation=trackedGeneration else { return false }
+        return isCurrentSurface && panel?.isEnabled == true && panel?.inputGeneration == generation
+    }
+    private func accepts(_ touch:UITouch, generation:UInt64?) -> Bool {
+        tracked === touch && trackedGeneration == generation && hasCurrentContact
+    }
+    private func resetContact() {
+        tracked=nil; trackedGeneration=nil; moved=false; cancelled=true
+    }
+    private func discard(_ touch:UITouch, generation:UInt64?) {
+        // A send callback may already have installed another contact. Do not erase it.
+        if tracked === touch && trackedGeneration == generation { resetContact() }
+    }
     override func touchesBegan(_ touches:Set<UITouch>,with event:UIEvent?) {
-        guard tracked == nil,let t=touches.first,usable else { return }
-        tracked=t;origin=t.location(in:self);moved=false;cancelled=false
-        point(origin)
-        if t.type == .indirectPointer { panel?.buttons(UInt8((event?.buttonMask.rawValue ?? 1) & 3)) }
+        if tracked != nil && !hasCurrentContact { resetContact() }
+        guard tracked == nil, let t=touches.first, let panel, panel.isEnabled, usable else { return }
+        let generation=panel.inputGeneration
+        let start=t.location(in:self)
+        point(start)
+        guard tracked == nil, panel.isEnabled, panel.isInside,
+              panel.inputGeneration == generation, isCurrentSurface else { return }
+        tracked=t; trackedGeneration=generation; origin=start; moved=false; cancelled=false
+        if t.type == .indirectPointer { panel.buttons(UInt8((event?.buttonMask.rawValue ?? 1) & 3)) }
     }
     override func touchesMoved(_ touches:Set<UITouch>,with event:UIEvent?) {
-        guard isCurrentSurface,let t=tracked,touches.contains(t),!cancelled else { return }
+        guard let t=tracked,touches.contains(t) else { return }
+        let generation=trackedGeneration
+        guard accepts(t,generation:generation), !cancelled else { discard(t,generation:generation);return }
         let p=t.location(in:self)
         if hypot(p.x-origin.x,p.y-origin.y) > 6 { moved=true }
         point(p)
-        if panel?.isInside != true { cancelled=true;panel?.leave() }
+        if !accepts(t,generation:generation) { discard(t,generation:generation) }
     }
     override func touchesEnded(_ touches:Set<UITouch>,with event:UIEvent?) {
-        guard isCurrentSurface else { tracked=nil;cancelled=true;return }
         guard let t=tracked,touches.contains(t) else { return }
+        let generation=trackedGeneration
+        defer { discard(t,generation:generation) }
+        guard accepts(t,generation:generation) else { return }
+        guard usable else { panel?.disable();return }
         let p=t.location(in:self)
-        if !cancelled,bounds.contains(p),usable {
-            if t.type == .indirectPointer { panel?.buttons(0) }
-            else if !moved { panel?.tap() }
+        guard !cancelled,bounds.contains(p) else { panel?.leave();return }
+        // The terminal location can differ from the last touchesMoved sample.
+        // Consume it before deciding tap versus drag, and before releasing a mouse button.
+        if hypot(p.x-origin.x,p.y-origin.y) > 6 { moved=true }
+        point(p)
+        guard accepts(t,generation:generation) else { return }
+        if t.type == .indirectPointer { panel?.buttons(0) }
+        else if !moved {
+            panel?.buttons(1)
+            if accepts(t,generation:generation) { panel?.buttons(0) }
         }
-        if t.type != .indirectPointer || cancelled || !bounds.contains(p) { panel?.leave() }
-        tracked=nil
+        if t.type != .indirectPointer, accepts(t,generation:generation) { panel?.leave() }
     }
     override func touchesCancelled(_ touches:Set<UITouch>,with event:UIEvent?) {
-        tracked=nil;cancelled=true;if isCurrentSurface { panel?.leave() }
+        guard let t=tracked, touches.isEmpty || touches.contains(t) else { return }
+        let generation=trackedGeneration
+        defer { discard(t,generation:generation) }
+        if accepts(t,generation:generation) { panel?.leave() }
     }
 }

@@ -28,6 +28,9 @@ final class PanelSession: ObservableObject {
     private(set) var status = "他のアプリの隣に置き、パッドを有効にしてください。" {
         willSet { if newValue != status { notifyPresentation() } }
     }
+    /// Changes when permission or the current pad visit is revoked. A queued
+    /// UIKit contact must never migrate into a later authorized visit.
+    private(set) var inputGeneration: UInt64 = 0
     var surfaceIsUsable: () -> Bool = { false }
     var sensitivity: Double = 1
     var reverseScroll = false
@@ -105,7 +108,7 @@ final class PanelSession: ObservableObject {
               now.isFinite, now >= 0 else {
             status = "受信先と操作パッドの表示状態を確認してください。"; return
         }
-        self.peer=peer; epoch=sender.inputEpoch; isEnabled=true
+        self.peer=peer; epoch=sender.inputEpoch; inputGeneration &+= 1; isEnabled=true
         status = "パッドの中はiPhone、外はiPad。離れると移動・ドラッグを解除します。"
         // Authorization is not a keystroke/click. First local event creates the neutral baseline.
     }
@@ -132,6 +135,7 @@ final class PanelSession: ObservableObject {
     func leave() {
         guard !disabling, !leaving else { return }
         leaving=true; defer { leaving=false }
+        inputGeneration &+= 1
         pointer.leave(); isInside=false
         // Discard queued nonzero motion immediately; do not replay it on re-entry.
         finishStroke()
@@ -141,6 +145,7 @@ final class PanelSession: ObservableObject {
         // A real window loss may still disable an in-progress leave.
         guard !disabling else { return }
         disabling=true; defer { disabling=false }
+        inputGeneration &+= 1
         isEnabled=false; pointer.leave(); isInside=false
         finishStroke(); peer=nil; epoch=nil
         if let reason { status=reason }
